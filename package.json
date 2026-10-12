@@ -30,6 +30,9 @@
     "sweetalert2": "^11.22.1",
     "tailwindcss": "^4.1.11"
   },
+  "overrides": {
+    "jose": "^5.10.0"
+  },
   "devDependencies": {
     "@eslint/js": "^9.29.0",
     "@playwright/test": "^1.64.0",
