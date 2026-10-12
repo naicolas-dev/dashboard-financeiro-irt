@@ -2,31 +2,25 @@ import { createContext, useContext, useEffect, useState } from 'react';
 
 const TemaContext = createContext();
 
-export function TemaProvider({ children }) {
-  const [temaEscuro, setTemaEscuro] = useState(false);
-
-  // Sincronizar classe dark ANTES de montar
-  useEffect(() => {
+function lerTemaSalvo() {
+  try {
     const salvo = localStorage.getItem('temaEscuro');
-    const valorInicial = salvo ? JSON.parse(salvo) : false;
+    return salvo ? JSON.parse(salvo) : false;
+  } catch {
+    return false;
+  }
+}
 
-    setTemaEscuro(valorInicial);
+export function TemaProvider({ children }) {
+  // Inicializa já lendo o valor salvo (síncrono, no primeiro render) — dois
+  // useEffect separados (um de leitura, um de escrita) competiam entre si e
+  // faziam o tema salvo se perder a cada reload (o de escrita rodava com o
+  // valor antigo antes do de leitura terminar de aplicar o valor correto).
+  const [temaEscuro, setTemaEscuro] = useState(lerTemaSalvo);
 
-    if (valorInicial) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, []);
-
-  // Atualiza quando usuário alterna via botão
   useEffect(() => {
     localStorage.setItem('temaEscuro', JSON.stringify(temaEscuro));
-    if (temaEscuro) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    document.documentElement.classList.toggle('dark', temaEscuro);
   }, [temaEscuro]);
 
   return (

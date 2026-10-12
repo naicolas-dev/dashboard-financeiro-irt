@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, where } from 'firebase/firestore';
+import React, { useState } from 'react';
+import { deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase/configuracao';
 import Swal from 'sweetalert2';
 import { PlusCircleIcon, TrashIcon, PencilIcon, ArrowPathIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
-import { useAuth } from '../contexto/AuthContext.jsx';
 import PainelBase from './PainelBase';
 
 const formatadorMoeda = new Intl.NumberFormat('pt-BR', {
@@ -43,23 +42,8 @@ const RecorrenteCard = ({ regra, onEditar, onExcluir }) => {
   );
 };
 
-const PainelRecorrentes = ({ onSelecionarParaEditar, onNovaRecorrenciaClick }) => {
-  const { usuario } = useAuth();
-  const [recorrencias, setRecorrencias] = useState([]);
-  const [carregando, setCarregando] = useState(true);
+const PainelRecorrentes = ({ onSelecionarParaEditar, onNovaRecorrenciaClick, recorrencias, carregando, onRecorrenciaExcluida }) => {
   const [expandido, setExpandido] = useState(false);
-
-  useEffect(() => {
-    if (!usuario) return;
-
-    const q = query(collection(db, 'transacoesRecorrentes'), where('userId', '==', usuario.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setRecorrencias(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-      setCarregando(false);
-    });
-
-    return () => unsubscribe();
-  }, [usuario]);
 
   const handleExcluir = async (id) => {
     const confirmacao = await Swal.fire({
@@ -74,6 +58,7 @@ const PainelRecorrentes = ({ onSelecionarParaEditar, onNovaRecorrenciaClick }) =
     if (confirmacao.isConfirmed) {
       try {
         await deleteDoc(doc(db, 'transacoesRecorrentes', id));
+        onRecorrenciaExcluida?.(id);
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Regra de recorrência removida!', timer: 3000, showConfirmButton: false });
       } catch (err) {
         console.error(err);

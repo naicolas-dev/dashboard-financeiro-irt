@@ -1,6 +1,6 @@
-import React, { createContext, useState, useEffect, useContext } from 'react';
-import { getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, signInWithCredential } from 'firebase/auth';
-import { app } from '../firebase/configuracao'; // Seu arquivo de configuração do Firebase
+import React, { createContext, useState, useEffect, useContext, useCallback } from 'react';
+import { getAuth, onAuthStateChanged, signInWithCustomToken, signOut } from 'firebase/auth';
+import { app } from '../firebase/configuracao';
 
 const AuthContext = createContext();
 
@@ -8,81 +8,79 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
+async function requisicaoJson(url, opcoes) {
+  const resposta = await fetch(url, { credentials: 'include', ...opcoes });
+  const dados = await resposta.json().catch(() => ({}));
+  if (!resposta.ok) {
+    throw new Error(dados.erro || 'Falha na requisição.');
+  }
+  return dados;
+}
+
 export function AuthProvider({ children }) {
   const [usuario, setUsuario] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const auth = getAuth(app);
 
+  const notificarAppNativo = useCallback((logado) => {
+    // Sinal usado por um app nativo (WebView) que embrulha este site.
+    if (window.ReactNativeWebView) {
+      window.ReactNativeWebView.postMessage(logado ? 'USER_LOGGED_IN' : 'USER_LOGGED_OUT');
+    }
+  }, []);
+
   useEffect(() => {
-    // Listener que observa mudanças no estado de autenticação do Firebase
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUsuario(user);
-      setCarregando(false);
-      
-      // ===================================================================
-      // ================ NOVA LÓGICA DE COMUNICAÇÃO =======================
-      // Verifica se está rodando dentro do nosso WebView nativo
-      if (window.ReactNativeWebView) {
-        if (user) {
-          // Se o usuário existe (logou), envia uma mensagem para o app nativo
-          window.ReactNativeWebView.postMessage('USER_LOGGED_IN');
-        } else {
-          // Se o usuário não existe (deslogou), envia outra mensagem
-          window.ReactNativeWebView.postMessage('USER_LOGGED_OUT');
-        }
-      }
-      // ===================================================================
+      notificarAppNativo(!!user);
     });
+    return unsubscribe;
+  }, [auth, notificarAppNativo]);
 
-    // Função para lidar com o token recebido do app nativo
-    const handleTokenFromNative = async (event) => {
-      console.log("Token recebido do app nativo!");
-      const { token } = event.detail;
+  useEffect(() => {
+    let ativo = true;
 
-      if (token) {
-        setCarregando(true);
-        try {
-          // Cria a credencial do Google a partir do token
-          const credential = GoogleAuthProvider.credential(token);
-          // Faz o login no Firebase com a credencial
-          await signInWithCredential(auth, credential);
-        } catch (error) {
-          console.error("Erro ao autenticar com a credencial nativa:", error);
-          setCarregando(false); 
-        }
+    const restaurarSessao = async () => {
+      try {
+        const { autenticado } = await requisicaoJson('/api/sessao');
+        if (!autenticado) return;
+
+        const { firebaseToken } = await requisicaoJson('/api/firebase-token');
+        await signInWithCustomToken(auth, firebaseToken);
+      } catch (erro) {
+        console.error('Não foi possível restaurar a sessão:', erro);
+      } finally {
+        if (ativo) setCarregando(false);
       }
     };
 
-    // Adiciona o listener para o evento customizado que o app nativo vai disparar
-    window.addEventListener('firebaseAuthTokenReceived', handleTokenFromNative);
-
-    // Função de limpeza que é executada quando o componente é desmontado
+    restaurarSessao();
     return () => {
-      unsubscribe(); // Limpa o listener de autenticação
-      window.removeEventListener('firebaseAuthTokenReceived', handleTokenFromNative); // Limpa o listener do token
+      ativo = false;
     };
   }, [auth]);
 
-  // Este método continuará funcionando para login via navegador web
-  const loginComGoogle = () => {
-    const provider = new GoogleAuthProvider();
-    return signInWithPopup(auth, provider);
-  };
-
-  const logout = () => {
-    return signOut(auth);
-  };
-
-  const value = {
-    usuario,
-    carregando,
-    loginComGoogle,
-    logout,
-  };
-
-  return (
-    <AuthContext.Provider value={value}>
-      {!carregando && children}
-    </AuthContext.Provider>
+  const login = useCallback(
+    async (senha) => {
+      const { firebaseToken } = await requisicaoJson('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ senha }),
+      });
+      await signInWithCustomToken(auth, firebaseToken);
+    },
+    [auth]
   );
+
+  const logout = useCallback(async () => {
+    try {
+      await requisicaoJson('/api/logout', { method: 'POST' });
+    } finally {
+      await signOut(auth);
+    }
+  }, [auth]);
+
+  const value = { usuario, carregando, login, logout };
+
+  return <AuthContext.Provider value={value}>{!carregando && children}</AuthContext.Provider>;
 }

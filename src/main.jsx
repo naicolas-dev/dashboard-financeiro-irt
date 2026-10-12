@@ -1,16 +1,32 @@
-import { StrictMode } from 'react';
+import { StrictMode, lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
+import { ChakraProvider } from '@chakra-ui/react';
+import '@fontsource-variable/inter';
 import './index.css';
 import App from './App.jsx';
-import { AuthProvider } from './contexto/AuthContext.jsx'; // Importe o AuthProvider
+import { AuthProvider } from './contexto/AuthContext.jsx';
 import { TemaProvider } from './contexto/TemaContext.jsx';
+import { chakraSystem } from './tema/chakraSystem.js';
+
+// Sandbox de UI isolado (Etapa 1 da modernização visual) — só existe em dev,
+// nunca entra no bundle de produção. Sem router: só checa o path na raiz.
+const ehDesignLab = import.meta.env.DEV && window.location.pathname === '/design-lab';
+const DesignLab = import.meta.env.DEV ? lazy(() => import('./paginas/DesignLab.jsx')) : null;
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <AuthProvider> {/* Envolva o App com o AuthProvider */}
-      <TemaProvider>
-        <App />
-      </TemaProvider>
-    </AuthProvider>
-  </StrictMode>,
-)
+    {ehDesignLab ? (
+      <Suspense fallback={null}>
+        <DesignLab />
+      </Suspense>
+    ) : (
+      <AuthProvider>
+        <TemaProvider>
+          <ChakraProvider value={chakraSystem}>
+            <App />
+          </ChakraProvider>
+        </TemaProvider>
+      </AuthProvider>
+    )}
+  </StrictMode>
+);

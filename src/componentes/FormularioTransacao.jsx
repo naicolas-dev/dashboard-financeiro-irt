@@ -1,19 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase/configuracao';
-import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
 import Swal from 'sweetalert2';
 import { useAuth } from '../contexto/AuthContext.jsx';
+import { criarTransacao, atualizarTransacao } from '../servicos/transacoes.js';
+import { CATEGORIAS_TRANSACAO } from '../constantes/categorias.js';
+import { obterDataHoraLocal } from '../utils/datas.js';
 
-const categoriasDisponiveis = ['Alimentação', 'Transporte', 'Moradia', 'Lazer', 'Saúde', 'Salário', 'Outro'];
+const categoriasDisponiveis = CATEGORIAS_TRANSACAO;
 const formatadorMoeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
-const obterDataHoraLocal = () => {
-  const agora = new Date();
-  const offset = agora.getTimezoneOffset() * 60000;
-  return new Date(agora.getTime() - offset).toISOString().slice(0, 16);
-};
-
-const FormularioTransacao = ({ transacaoParaEditar, onCancelarEdicao }) => {
+const FormularioTransacao = ({ transacaoParaEditar, onCancelarEdicao, onTransacaoSalva }) => {
   const { usuario } = useAuth();
   const modoEdicao = !!transacaoParaEditar;
 
@@ -64,16 +59,17 @@ const FormularioTransacao = ({ transacaoParaEditar, onCancelarEdicao }) => {
       tipo,
       categoria,
       data,
-      userId: usuario.uid,
     };
 
     try {
       if (modoEdicao) {
-        await updateDoc(doc(db, 'transacoes', transacaoParaEditar.id), dadosTransacao);
+        const salva = await atualizarTransacao(transacaoParaEditar.id, dadosTransacao);
+        onTransacaoSalva?.(salva);
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Transação atualizada!', showConfirmButton: false, timer: 3000 });
         onCancelarEdicao();
       } else {
-        await addDoc(collection(db, 'transacoes'), dadosTransacao);
+        const salva = await criarTransacao(dadosTransacao);
+        onTransacaoSalva?.(salva);
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Transação adicionada!', showConfirmButton: false, timer: 3000 });
         setDescricao('');
         setValor('');

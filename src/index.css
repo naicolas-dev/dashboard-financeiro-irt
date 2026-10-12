@@ -1,5 +1,122 @@
+/* Pré-declara a ordem de TODOS os @layer do documento (Tailwind + Chakra/Emotion)
+   antes de qualquer um dos dois ser de fato carregado. Prioridade de @layer em CSS
+   é definida pela ordem da PRIMEIRA declaração de cada nome no documento inteiro —
+   não por qual <style> é injetado primeiro. Sem isso, o reset/tokens/recipes do
+   Chakra (injetado em runtime pelo Emotion, depois do CSS do Tailwind) acabava
+   registrado como layer de prioridade MAIOR que o `utilities` do Tailwind, e
+   vencia até `.mx-auto`/`.max-w-xl` por cascata de layer, não por especificidade —
+   era a causa do conteúdo encolher pro canto superior esquerdo (margin:auto virava
+   margin:0). `base` aparece nos dois lados de propósito: é o mesmo layer físico
+   pros dois sistemas, então o reset de base de qualquer um dos dois fica abaixo de
+   `components`/`utilities` — nunca sobrescreve uma classe Tailwind explícita. */
+@layer reset, tokens, recipes, theme, base, components, utilities;
+
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+
+/*
+ * Tokens semânticos (Foundation da modernização visual — Fase 2).
+ * Nenhum componente consome isso ainda: a migração de slate-800/indigo-600
+ * literais para bg-surface/text-foreground etc. acontece junto da reconstrução
+ * de cada tela, não antes. Valores de partida pensados para a direção visual
+ * já combinada (off-white quente no light, near-black/graphite no dark) —
+ * serão ajustados no Design Lab, não são finais.
+ */
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+
+  --color-background: #f7f6f2;
+  /* `surface`/`surface-raised` aqui seguem o PAPEL já estabelecido no resto do app
+     (raised = mais branco/proeminente, usado em cards/dialogs/Hero; surface = tom
+     base, usado em elementos aninhados) — mesma relação que já existe no dark
+     (raised mais claro que surface). O valor numérico de cada um não mudou: já
+     eram #fbfaf7/#ffffff antes dessa rodada. */
+  --color-surface: #fbfaf7;
+  --color-surface-raised: #ffffff;
+  --color-surface-hover: #efede7;
+  /* Novo: estado selecionado/ativo (nav ativa, tab ativa, chip ativo) — distinto de
+     `surface-hover`, que continua só pra feedback passageiro de :hover. */
+  --color-surface-active: #e5e3dc;
+  --color-foreground: #16181d;
+  /* "Muted" do novo sistema (texto secundário) — mesmo papel de sempre, só o valor
+     mudou; não renomeei o token pra não quebrar os componentes que já usam
+     `text-foreground-secondary` em todo o projeto. */
+  --color-foreground-secondary: #666b73;
+  /* "Subtle" do novo sistema (texto terciário) — idem, mapeado pro token
+     `foreground-muted` já existente. */
+  --color-foreground-muted: #8d9198;
+  --color-border: #dedcd5;
+  --color-border-strong: #c5c2b8;
+  /* `primary` deixou de ser "cor de marca" (era indigo → teal → prata) — agora é só
+     contraste neutro máximo (texto/fundo invertidos), sem significado próprio. Cor
+     com significado fica só em positive/negative/warning daqui pra baixo. */
+  --color-primary: #16181d;
+  --color-primary-hover: #2b2e34;
+  --color-primary-foreground: #ffffff;
+  --color-positive: #0b8f55;
+  --color-negative: #d64545;
+  --color-warning: #b7791f;
+  --color-focus-ring: #16181d;
+  --color-overlay: rgb(0 0 0 / 0.4);
+}
+
+.dark {
+  --color-background: #090a0c;
+  --color-surface: #131519;
+  --color-surface-raised: #1a1d22;
+  --color-surface-hover: #1f1f23;
+  --color-surface-active: #262b32;
+  --color-foreground: #f4f5f7;
+  --color-foreground-secondary: #a7adb7;
+  --color-foreground-muted: #737a86;
+  --color-border: #2b2f36;
+  --color-border-strong: #3a3f48;
+  /* Quase branco + texto quase preto — mais contrastado/"premium" que um cinza
+     médio, mas ainda sem ser uma cor de marca. */
+  --color-primary: #f4f5f7;
+  --color-primary-hover: #d9dce1;
+  --color-primary-foreground: #16181d;
+  --color-positive: #2dd181;
+  --color-negative: #ff5a67;
+  --color-warning: #f2b84b;
+  --color-focus-ring: #f4f5f7;
+  --color-overlay: rgb(0 0 0 / 0.6);
+}
+
+/* Primitivas de safe-area (notch/home indicator) — ainda não aplicadas em nenhum componente. */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@utility pl-safe {
+  padding-left: env(safe-area-inset-left);
+}
+@utility pr-safe {
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Só aparece em navegação por teclado (:focus-visible) — nunca em repouso/clique com mouse. */
+@utility focus-ring {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  &:focus-visible {
+    outline-color: var(--color-focus-ring);
+  }
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

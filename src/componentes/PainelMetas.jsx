@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, onSnapshot, doc, deleteDoc, updateDoc, increment, where } from 'firebase/firestore';
+import React, { useState, useMemo } from 'react';
+import { doc, deleteDoc, updateDoc, increment } from 'firebase/firestore';
 import { db } from '../firebase/configuracao';
 import Swal from 'sweetalert2';
 import { PlusCircleIcon, PencilIcon, TrashIcon, ChevronDownIcon, ChevronUpIcon, CheckBadgeIcon } from '@heroicons/react/24/outline';
 import confetti from 'canvas-confetti';
-import { useAuth } from '../contexto/AuthContext.jsx';
 import PainelBase from './PainelBase';
 
 const formatadorMoeda = new Intl.NumberFormat('pt-BR', {
@@ -88,27 +87,19 @@ const MetaCard = ({ meta, onEditar, onExcluir, onAdicionarProgresso }) => {
   );
 };
 
-const PainelMetas = ({ onNovaMetaClick, onSelecionarMetaParaEditar, transacoes }) => {
-  const { usuario } = useAuth();
-  const [metas, setMetas] = useState([]);
-  const [carregando, setCarregando] = useState(true);
+const PainelMetas = ({
+  onNovaMetaClick,
+  onSelecionarMetaParaEditar,
+  transacoes,
+  metas,
+  carregando,
+  onMetaAtualizada,
+  onMetaExcluida,
+}) => {
   const [expandido, setExpandido] = useState(false);
 
-  useEffect(() => {
-    if (!usuario) return;
-
-    const q = query(collection(db, "metas"), where("userId", "==", usuario.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const lista = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-      setMetas(lista);
-      setCarregando(false);
-    });
-
-    return () => unsubscribe();
-  }, [usuario]);
-
   const metasComProgresso = useMemo(() => {
-    if (!usuario || !transacoes) return [];
+    if (!transacoes) return [];
 
     return metas.map(meta => {
       let valorAtualCalculado = meta.valorAtual || 0;
@@ -120,11 +111,12 @@ const PainelMetas = ({ onNovaMetaClick, onSelecionarMetaParaEditar, transacoes }
             .filter(t => t.tipo === 'despesa' && t.categoria === meta.categoria && t.data.startsWith(meta.mes))
             .reduce((acc, t) => acc + t.valor, 0);
           break;
-        case 'SALDO_MES':
+        case 'SALDO_MES': {
           const receitas = transacoes.filter(t => t.tipo === 'receita' && t.data.startsWith(meta.mes)).reduce((acc, t) => acc + t.valor, 0);
           const despesas = transacoes.filter(t => t.tipo === 'despesa' && t.data.startsWith(meta.mes)).reduce((acc, t) => acc + t.valor, 0);
           valorAtualCalculado = receitas - despesas;
           break;
+        }
         default:
           break;
       }
@@ -135,7 +127,7 @@ const PainelMetas = ({ onNovaMetaClick, onSelecionarMetaParaEditar, transacoes }
       const progresso = meta.valorAlvo > 0 ? (valorAtualCalculado / meta.valorAlvo) * 100 : 0;
       return { ...meta, valorAtualCalculado, progresso, status };
     });
-  }, [metas, transacoes, usuario]);
+  }, [metas, transacoes]);
 
   const handleAdicionarProgresso = async (meta) => {
     const { value: valorFinal } = await Swal.fire({
@@ -166,7 +158,11 @@ const PainelMetas = ({ onNovaMetaClick, onSelecionarMetaParaEditar, transacoes }
     if (valorFinal) {
       try {
         await updateDoc(doc(db, 'metas', meta.id), { valorAtual: increment(valorFinal) });
-        if (meta.valorAtualCalculado + valorFinal >= meta.valorAlvo) {
+        const { valorAtualCalculado, progresso: _progresso, status: _status, ...metaBase } = meta;
+        const novoValorAtual = (meta.valorAtual || 0) + valorFinal;
+        onMetaAtualizada?.({ ...metaBase, valorAtual: novoValorAtual });
+
+        if (valorAtualCalculado + valorFinal >= meta.valorAlvo) {
           Swal.fire({
             title: 'Parabéns!',
             text: `Você alcançou sua meta "${meta.nome}"!`,
@@ -196,6 +192,7 @@ const PainelMetas = ({ onNovaMetaClick, onSelecionarMetaParaEditar, transacoes }
     if (confirmacao.isConfirmed) {
       try {
         await deleteDoc(doc(db, 'metas', id));
+        onMetaExcluida?.(id);
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Meta excluída!', showConfirmButton: false, timer: 3000 });
       } catch (err) {
         console.error(err);

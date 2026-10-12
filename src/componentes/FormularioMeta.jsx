@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase/configuracao';
-import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, Timestamp } from 'firebase/firestore';
 import Swal from 'sweetalert2';
 import { useAuth } from '../contexto/AuthContext.jsx';
 
@@ -17,7 +17,7 @@ const tiposDeMeta = [
 
 const categoriasDisponiveis = ['Alimentação', 'Transporte', 'Moradia', 'Lazer', 'Saúde', 'Outro'];
 
-const FormularioMeta = ({ aoFinalizar, metaParaEditar }) => {
+const FormularioMeta = ({ aoFinalizar, metaParaEditar, onMetaSalva }) => {
   const { usuario } = useAuth();
 
   const [tipo, setTipo] = useState(tiposDeMeta[0].valor);
@@ -83,7 +83,6 @@ const FormularioMeta = ({ aoFinalizar, metaParaEditar }) => {
       nome,
       tipo,
       valorAlvo: valorAlvoNumerico,
-      userId: usuario.uid,
     };
 
     if (tipo === 'ECONOMIA') {
@@ -96,9 +95,18 @@ const FormularioMeta = ({ aoFinalizar, metaParaEditar }) => {
     }
 
     try {
+      // dataFim/dataCriacao viram Date simples para o Firestore, mas o estado local
+      // precisa do formato Timestamp (com .toDate()) igual ao que viria de uma leitura.
+      const paraEstadoLocal = (dados) => ({
+        ...dados,
+        ...(dados.dataFim instanceof Date && { dataFim: Timestamp.fromDate(dados.dataFim) }),
+        ...(dados.dataCriacao instanceof Date && { dataCriacao: Timestamp.fromDate(dados.dataCriacao) }),
+      });
+
       if (modoEdicao) {
         const metaDocRef = doc(db, 'metas', metaParaEditar.id);
         await updateDoc(metaDocRef, dadosMeta);
+        onMetaSalva?.(paraEstadoLocal({ ...metaParaEditar, ...dadosMeta }));
         Swal.fire({
           toast: true, position: 'top-end', icon: 'success',
           title: 'Sua meta foi atualizada!',
@@ -107,7 +115,8 @@ const FormularioMeta = ({ aoFinalizar, metaParaEditar }) => {
       } else {
         dadosMeta.valorAtual = 0;
         dadosMeta.dataCriacao = new Date();
-        await addDoc(collection(db, 'metas'), dadosMeta);
+        const docRef = await addDoc(collection(db, 'metas'), dadosMeta);
+        onMetaSalva?.(paraEstadoLocal({ id: docRef.id, ...dadosMeta }));
         Swal.fire({
           toast: true, position: 'top-end', icon: 'success',
           title: 'Sua nova meta foi criada!',

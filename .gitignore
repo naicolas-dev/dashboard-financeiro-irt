@@ -1,0 +1,35 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+# Env files (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# Vercel
+.vercel
+
+# Claude Code (permissões/preferências locais, não fazem sentido versionadas)
+.claude/settings.local.json
+
+# Playwright (verificação local automatizada — scripts/verificar-ui.mjs)
+scripts/.capturas
+playwright-report
+test-results
+
+# Editor/OS
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

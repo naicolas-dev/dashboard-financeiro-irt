@@ -1,0 +1,35 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Substitua pelo mesmo valor configurado em FIREBASE_OWNER_UID no backend.
+    function ehProprietario() {
+      return request.auth != null && request.auth.uid == "owner";
+    }
+
+    match /transacoes/{id} {
+      allow read, write: if ehProprietario();
+    }
+
+    match /metas/{id} {
+      allow read, write: if ehProprietario();
+    }
+
+    match /transacoesRecorrentes/{id} {
+      allow read, write: if ehProprietario();
+    }
+
+    match /cartoes/{id} {
+      allow read, write: if ehProprietario();
+    }
+
+    match /comprasCartao/{id} {
+      allow read, write: if ehProprietario();
+    }
+
+    // Qualquer outra coleção fica bloqueada por padrão.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,18 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase/configuracao';
-import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, Timestamp } from 'firebase/firestore';
 import Swal from 'sweetalert2';
 import { useAuth } from '../contexto/AuthContext.jsx';
 
 const categoriasDisponiveis = ['Alimentação', 'Transporte', 'Moradia', 'Lazer', 'Saúde', 'Salário', 'Outro'];
 const formatadorMoeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
-const FormularioRecorrente = ({ aoFinalizar, recorrenciaParaEditar }) => {
+const FormularioRecorrente = ({ aoFinalizar, recorrenciaParaEditar, onRecorrenciaSalva, tipoInicial }) => {
   const { usuario } = useAuth();
 
   const [descricao, setDescricao] = useState('');
   const [valor, setValor] = useState('');
-  const [tipo, setTipo] = useState('despesa');
+  const [tipo, setTipo] = useState(tipoInicial ?? 'despesa');
   const [categoria, setCategoria] = useState(categoriasDisponiveis[0]);
   const [diaDoMes, setDiaDoMes] = useState(1);
 
@@ -28,11 +28,13 @@ const FormularioRecorrente = ({ aoFinalizar, recorrenciaParaEditar }) => {
     } else {
       setDescricao('');
       setValor('');
-      setTipo('despesa');
+      // Criada a partir da Home (QuickAction Receita/Despesa já em "modo recorrentes")
+      // chega com `tipoInicial` — não força sempre "despesa" nesse caso.
+      setTipo(tipoInicial ?? 'despesa');
       setCategoria(categoriasDisponiveis[0]);
       setDiaDoMes(1);
     }
-  }, [recorrenciaParaEditar, modoEdicao]);
+  }, [recorrenciaParaEditar, modoEdicao, tipoInicial]);
 
   const handleValorChange = (e) => {
     setValor(e.target.value.replace(/\D/g, ''));
@@ -58,22 +60,24 @@ const FormularioRecorrente = ({ aoFinalizar, recorrenciaParaEditar }) => {
       tipo,
       categoria,
       diaDoMes: Number(diaDoMes),
-      userId: usuario.uid,
     };
 
     try {
       if (modoEdicao) {
         const docRef = doc(db, 'transacoesRecorrentes', recorrenciaParaEditar.id);
         await updateDoc(docRef, dadosRecorrencia);
+        onRecorrenciaSalva?.({ ...recorrenciaParaEditar, ...dadosRecorrencia });
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Recorrência atualizada!', showConfirmButton: false, timer: 3000 });
       } else {
-        await addDoc(collection(db, 'transacoesRecorrentes'), {
+        const dadosCompletos = {
           ...dadosRecorrencia,
           frequencia: 'mensal',
           dataInicio: new Date(),
           ultimoRegistro: null,
           ativa: true,
-        });
+        };
+        const docRef = await addDoc(collection(db, 'transacoesRecorrentes'), dadosCompletos);
+        onRecorrenciaSalva?.({ id: docRef.id, ...dadosCompletos, dataInicio: Timestamp.fromDate(dadosCompletos.dataInicio) });
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Recorrência criada!', showConfirmButton: false, timer: 3000 });
       }
       aoFinalizar();
