@@ -63,6 +63,13 @@ const AppShell = ({ home, movimentacoes, cartoes, metas, activeSection, onNavega
 
   return (
     <div className="min-h-dvh bg-background text-foreground pb-24 lg:pb-8 lg:pt-24">
+      <a
+        href="#conteudo-principal"
+        className="focus-ring sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:top-4 focus-visible:left-4 focus-visible:z-50 focus-visible:rounded-xl focus-visible:border focus-visible:border-border focus-visible:bg-surface-raised focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-foreground"
+      >
+        Pular para o conteúdo
+      </a>
+
       {/* Header full-width é só pra mobile/tablet — no desktop a navegação inteira
           (incl. tema/logout) vive dentro da DesktopNavigation flutuante abaixo. */}
       <header className="lg:hidden sticky top-0 z-30 bg-surface-raised border-b border-border pt-safe">
@@ -91,7 +98,9 @@ const AppShell = ({ home, movimentacoes, cartoes, metas, activeSection, onNavega
         onSair={handleLogout}
       />
 
-      <main>{renderSecao()}</main>
+      <main id="conteudo-principal" tabIndex={-1}>
+        {renderSecao()}
+      </main>
 
       <BottomNavigation ativo={activeSection} aoNavegar={onNavegar} />
       <PWAController />
