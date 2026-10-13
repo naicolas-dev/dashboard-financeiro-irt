@@ -70,25 +70,20 @@ const AppShell = ({ home, movimentacoes, cartoes, metas, activeSection, onNavega
         Pular para o conteúdo
       </a>
 
-      {/* Header full-width é só pra mobile/tablet — no desktop a navegação inteira
-          (incl. tema/logout) vive dentro da DesktopNavigation flutuante abaixo. */}
-      <header className="lg:hidden sticky top-0 z-30 bg-surface-raised border-b border-border pt-safe">
-        <div className="px-4 h-14 flex items-center justify-between">
-          <p className="font-semibold text-sm">Dashboard Financeiro</p>
-
-          <div className="flex items-center gap-1">
-            <IconButton
-              aria-label={temaEscuro ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
-              onClick={() => setTemaEscuro(!temaEscuro)}
-            >
-              {temaEscuro ? <SunIcon className="h-5 w-5" /> : <MoonIcon className="h-5 w-5" />}
-            </IconButton>
-            <IconButton aria-label="Sair" onClick={handleLogout}>
-              <ArrowRightOnRectangleIcon className="h-5 w-5" />
-            </IconButton>
-          </div>
-        </div>
-      </header>
+      {/* Mobile/tablet: só Tema+Logout flutuando no canto, sem barra full-width —
+          a navegação principal já mora na BottomNavigation. No desktop esses dois
+          controles vivem dentro da DesktopNavigation flutuante abaixo. */}
+      <div className="lg:hidden fixed z-30 flex items-center gap-1 top-[calc(env(safe-area-inset-top)+0.5rem)] right-[calc(env(safe-area-inset-right)+1rem)]">
+        <IconButton
+          aria-label={temaEscuro ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+          onClick={() => setTemaEscuro(!temaEscuro)}
+        >
+          {temaEscuro ? <SunIcon className="h-5 w-5" /> : <MoonIcon className="h-5 w-5" />}
+        </IconButton>
+        <IconButton aria-label="Sair" onClick={handleLogout}>
+          <ArrowRightOnRectangleIcon className="h-5 w-5" />
+        </IconButton>
+      </div>
 
       <DesktopNavigation
         activeSection={activeSection}
@@ -98,7 +93,7 @@ const AppShell = ({ home, movimentacoes, cartoes, metas, activeSection, onNavega
         onSair={handleLogout}
       />
 
-      <main id="conteudo-principal" tabIndex={-1}>
+      <main id="conteudo-principal" tabIndex={-1} className="pt-[calc(env(safe-area-inset-top)+3.75rem)] lg:pt-0">
         {renderSecao()}
       </main>
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 
 const MotionDiv = motion.div;
@@ -23,11 +23,18 @@ function useEhDesktop() {
 
 const ResponsiveDialog = ({ aberto, aoFechar, titulo, children }) => {
   const ehDesktop = useEhDesktop();
+  const dialogRef = useRef(null);
 
   useEffect(() => {
     if (!aberto) return;
     const aoTeclar = (e) => {
-      if (e.key === 'Escape') aoFechar();
+      if (e.key !== 'Escape') return;
+      // Se houver algo empilhado por cima (ex.: o Drawer mobile do ComboboxField,
+      // que também é um [role="dialog"] via Portal), o Escape fecha só o de cima
+      // primeiro — sem isso, o listener global daqui fechava os dois juntos.
+      const todos = document.querySelectorAll('[role="dialog"]');
+      if (todos[todos.length - 1] !== dialogRef.current) return;
+      aoFechar();
     };
     window.addEventListener('keydown', aoTeclar);
     return () => window.removeEventListener('keydown', aoTeclar);
@@ -62,6 +69,7 @@ const ResponsiveDialog = ({ aberto, aoFechar, titulo, children }) => {
             aria-hidden="true"
           />
           <MotionDiv
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-label={titulo}

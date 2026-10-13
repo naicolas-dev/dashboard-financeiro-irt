@@ -77,6 +77,7 @@ function PWAController() {
   useEffect(() => {
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', temaEscuro ? '#090a0c' : '#f7f6f2');
+    document.documentElement.style.colorScheme = temaEscuro ? 'dark' : 'light';
   }, [temaEscuro]);
 
   useEffect(() => {

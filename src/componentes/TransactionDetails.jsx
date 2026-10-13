@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChevronRightIcon } from '@heroicons/react/24/outline';
-import { RadioCard } from '@chakra-ui/react';
+import { SegmentGroup } from '@chakra-ui/react';
 import Input from './ui/Input';
 import Button from './ui/Button';
 import SelectField from './ui/SelectField';
@@ -124,30 +124,28 @@ const TransactionDetails = ({
           {!cartaoForcado && (
             <div>
               <p className="text-sm font-medium text-foreground-secondary mb-1.5">Forma de pagamento</p>
-              <RadioCard.Root
+              <SegmentGroup.Root
                 value={formaPagamento}
                 onValueChange={(details) => setFormaPagamento(details.value)}
+                className="w-full p-1 rounded-xl bg-surface-hover"
               >
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { valor: 'sem_cartao', texto: 'Sem cartão' },
-                    { valor: 'cartao', texto: 'Cartão de crédito' },
-                  ].map((opcao) => (
-                    <RadioCard.Item key={opcao.valor} value={opcao.valor}>
-                      <RadioCard.ItemHiddenInput />
-                      <RadioCard.ItemControl
-                        className={`focus-ring cursor-pointer h-11 rounded-xl text-sm font-medium transition-colors flex items-center justify-center ${
-                          formaPagamento === opcao.valor
-                            ? 'bg-surface-active text-foreground'
-                            : 'bg-surface-raised text-foreground-secondary border border-border hover:bg-surface-hover'
-                        }`}
-                      >
-                        <RadioCard.ItemText>{opcao.texto}</RadioCard.ItemText>
-                      </RadioCard.ItemControl>
-                    </RadioCard.Item>
-                  ))}
-                </div>
-              </RadioCard.Root>
+                <SegmentGroup.Indicator className="rounded-lg bg-surface-raised dark:bg-surface-active shadow-sm" />
+                {[
+                  { valor: 'sem_cartao', texto: 'Sem cartão' },
+                  { valor: 'cartao', texto: 'Cartão de crédito' },
+                ].map((opcao) => (
+                  <SegmentGroup.Item key={opcao.valor} value={opcao.valor} className="flex-1">
+                    <SegmentGroup.ItemText
+                      className={`focus-ring cursor-pointer flex items-center justify-center h-9 rounded-lg text-sm font-medium transition-colors ${
+                        formaPagamento === opcao.valor ? 'text-foreground' : 'text-foreground-secondary'
+                      }`}
+                    >
+                      {opcao.texto}
+                    </SegmentGroup.ItemText>
+                    <SegmentGroup.ItemHiddenInput />
+                  </SegmentGroup.Item>
+                ))}
+              </SegmentGroup.Root>
             </div>
           )}
 
