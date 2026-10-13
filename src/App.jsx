@@ -24,6 +24,7 @@ function App() {
     <Home
       transacoes={dados.transacoes}
       carregando={dados.carregando}
+      erroCarregamento={dados.erroCarregamento}
       handleTransacaoSalva={dados.handleTransacaoSalva}
       recorrencias={dados.recorrencias}
       handleRecorrenciaSalva={dados.handleRecorrenciaSalva}
@@ -45,6 +46,7 @@ function App() {
       setters={dados.setters}
       limparFiltros={dados.limparFiltros}
       carregando={dados.carregando}
+      erroCarregamento={dados.erroCarregamento}
       excluirTransacao={dados.excluirTransacao}
       handleTransacaoSalva={dados.handleTransacaoSalva}
       recorrencias={dados.recorrencias}
@@ -60,6 +62,7 @@ function App() {
       comprasCartao={dados.comprasCartao}
       parcelasCartao={dados.parcelasCartao}
       carregando={dados.carregando}
+      erroCarregamento={dados.erroCarregamento}
       handleCartaoSalvo={dados.handleCartaoSalvo}
       handleCompraCriada={dados.handleCompraCriada}
       excluirCartao={dados.excluirCartao}
@@ -73,6 +76,7 @@ function App() {
     <Metas
       metas={dados.metas}
       carregando={dados.carregando}
+      erroCarregamento={dados.erroCarregamento}
       saldoDisponivel={dados.saldoDisponivel}
       totalReservadoMetas={dados.totalReservadoMetas}
       handleMetaSalva={dados.handleMetaSalva}

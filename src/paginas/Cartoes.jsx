@@ -41,6 +41,7 @@ const Cartoes = ({
   comprasCartao,
   parcelasCartao,
   carregando,
+  erroCarregamento,
   handleCartaoSalvo,
   handleCompraCriada,
   excluirCartao,
@@ -85,8 +86,10 @@ const Cartoes = ({
       <div>
         <h1 className="text-xl font-semibold text-foreground">Cartões</h1>
         {!carregando && cartoes.length === 0 && (
-          <p className="text-sm text-foreground-secondary mt-1">
-            Nenhum cartão cadastrado. Toque em "Adicionar cartão" para começar.
+          <p className={`text-sm mt-1 ${erroCarregamento ? 'text-warning' : 'text-foreground-secondary'}`}>
+            {erroCarregamento
+              ? 'Sem conexão — não foi possível carregar seus cartões.'
+              : 'Nenhum cartão cadastrado. Toque em "Adicionar cartão" para começar.'}
           </p>
         )}
       </div>

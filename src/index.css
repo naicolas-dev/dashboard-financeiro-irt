@@ -83,7 +83,10 @@
   --color-overlay: rgb(0 0 0 / 0.6);
 }
 
-/* Primitivas de safe-area (notch/home indicator) — ainda não aplicadas em nenhum componente. */
+/* Primitivas de safe-area (notch/home indicator) — usadas em BottomNavigation,
+   ResponsiveDialog (sheet mobile), FloatingActionButton e no header mobile do
+   AppShell. Só têm efeito de verdade com `viewport-fit=cover` no viewport meta
+   (index.html) — sem isso, env(safe-area-inset-*) sempre resolve pra 0px. */
 @utility pt-safe {
   padding-top: env(safe-area-inset-top);
 }

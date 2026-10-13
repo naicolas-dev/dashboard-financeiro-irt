@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { MagnifyingGlassIcon, XMarkIcon, InboxIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, XMarkIcon, InboxIcon, ArrowPathIcon, SignalSlashIcon } from '@heroicons/react/24/outline';
 import TransactionRow from '../componentes/TransactionRow.jsx';
 import RecurrenceRow from '../componentes/RecurrenceRow.jsx';
 import ResponsiveDialog from '../componentes/ui/ResponsiveDialog.jsx';
@@ -49,6 +49,7 @@ const Movimentacoes = ({
   setters,
   limparFiltros,
   carregando,
+  erroCarregamento,
   excluirTransacao,
   handleTransacaoSalva,
   recorrencias,
@@ -205,11 +206,15 @@ const Movimentacoes = ({
           <HistoricoSkeleton />
         ) : modoRecorrentes ? (
           recorrenciasFiltradas.length === 0 ? (
-            <EmptyState
-              icone={ArrowPathIcon}
-              titulo="Nenhuma recorrência encontrada"
-              descricao="Ajuste a busca/categoria, ou crie uma recorrência pela tela inicial."
-            />
+            erroCarregamento ? (
+              <EmptyState icone={SignalSlashIcon} titulo="Sem conexão" descricao="Não foi possível carregar as recorrências." />
+            ) : (
+              <EmptyState
+                icone={ArrowPathIcon}
+                titulo="Nenhuma recorrência encontrada"
+                descricao="Ajuste a busca/categoria, ou crie uma recorrência pela tela inicial."
+              />
+            )
           ) : (
             <div className="rounded-2xl border border-border bg-surface-raised p-2 divide-y divide-border">
               {recorrenciasFiltradas.map((r) => (
@@ -226,11 +231,15 @@ const Movimentacoes = ({
             </div>
           )
         ) : grupos.length === 0 ? (
-          <EmptyState
-            icone={InboxIcon}
-            titulo="Nenhuma transação encontrada"
-            descricao="Ajuste a busca ou os filtros para ver outros lançamentos."
-          />
+          erroCarregamento ? (
+            <EmptyState icone={SignalSlashIcon} titulo="Sem conexão" descricao="Não foi possível carregar as transações." />
+          ) : (
+            <EmptyState
+              icone={InboxIcon}
+              titulo="Nenhuma transação encontrada"
+              descricao="Ajuste a busca ou os filtros para ver outros lançamentos."
+            />
+          )
         ) : (
           grupos.map(([cabecalho, itens]) => (
             <div key={cabecalho} className="space-y-2">

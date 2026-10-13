@@ -30,6 +30,7 @@ const FinancialHero = ({
   receitas,
   despesas,
   variacaoMes,
+  dadosIndisponiveis = false,
   recolhido = false,
   modoRecorrentes = false,
   metaDestaque,
@@ -43,18 +44,27 @@ const FinancialHero = ({
     <section className="rounded-[22px] bg-surface-raised border border-border p-5 sm:p-6 space-y-5">
       <div>
         <p className="text-sm text-foreground-secondary">Saldo atual</p>
-        <p className="text-4xl sm:text-[42px] font-semibold tracking-tight text-foreground tabular-nums leading-tight">
-          <NumberFlow value={saldo} format={formatoMoeda} locales="pt-BR" />
-        </p>
-        {typeof variacaoMes === 'number' && (
-          <p
-            className={`text-sm mt-1 tabular-nums ${
-              variacaoMes > 0 ? 'text-positive' : variacaoMes < 0 ? 'text-negative' : 'text-foreground-muted'
-            }`}
-          >
-            {variacaoMes > 0 ? '+' : ''}
-            {formatadorEstatico.format(variacaoMes)} este mês
-          </p>
+        {dadosIndisponiveis ? (
+          <>
+            <p className="text-4xl sm:text-[42px] font-semibold tracking-tight text-foreground-muted leading-tight">—</p>
+            <p className="text-sm mt-1 text-warning">Sem conexão — dados financeiros não atualizados.</p>
+          </>
+        ) : (
+          <>
+            <p className="text-4xl sm:text-[42px] font-semibold tracking-tight text-foreground tabular-nums leading-tight">
+              <NumberFlow value={saldo} format={formatoMoeda} locales="pt-BR" />
+            </p>
+            {typeof variacaoMes === 'number' && (
+              <p
+                className={`text-sm mt-1 tabular-nums ${
+                  variacaoMes > 0 ? 'text-positive' : variacaoMes < 0 ? 'text-negative' : 'text-foreground-muted'
+                }`}
+              >
+                {variacaoMes > 0 ? '+' : ''}
+                {formatadorEstatico.format(variacaoMes)} este mês
+              </p>
+            )}
+          </>
         )}
       </div>
 
@@ -63,14 +73,18 @@ const FinancialHero = ({
           <ArrowUpIcon className="h-4 w-4 text-positive shrink-0" />
           <div>
             <p className="text-xs text-foreground-muted">Receitas</p>
-            <p className="text-sm font-semibold text-foreground tabular-nums">{formatadorEstatico.format(receitas)}</p>
+            <p className="text-sm font-semibold text-foreground tabular-nums">
+              {dadosIndisponiveis ? '—' : formatadorEstatico.format(receitas)}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <ArrowDownIcon className="h-4 w-4 text-negative shrink-0" />
           <div>
             <p className="text-xs text-foreground-muted">Despesas</p>
-            <p className="text-sm font-semibold text-foreground tabular-nums">{formatadorEstatico.format(despesas)}</p>
+            <p className="text-sm font-semibold text-foreground tabular-nums">
+              {dadosIndisponiveis ? '—' : formatadorEstatico.format(despesas)}
+            </p>
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { SegmentGroup } from '@chakra-ui/react';
-import { InboxIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import { InboxIcon, ArrowPathIcon, SignalSlashIcon } from '@heroicons/react/24/outline';
 import FinancialHero from '../componentes/FinancialHero.jsx';
 import TransactionRow from '../componentes/TransactionRow.jsx';
 import RecurrenceRow from '../componentes/RecurrenceRow.jsx';
@@ -38,6 +38,7 @@ function HomeSkeleton() {
 const Home = ({
   transacoes,
   carregando,
+  erroCarregamento,
   handleTransacaoSalva,
   recorrencias,
   handleRecorrenciaSalva,
@@ -146,6 +147,7 @@ const Home = ({
         receitas={resumo.receitas}
         despesas={resumo.despesas}
         variacaoMes={resumo.resultadoMes}
+        dadosIndisponiveis={erroCarregamento}
         metaDestaque={metaDestaque}
         onAbrirMetaDestaque={onAbrirMetas}
         onReceita={aoClicarReceita}
@@ -180,11 +182,15 @@ const Home = ({
 
         {modoRecorrentes ? (
           recorrencias.length === 0 ? (
-            <EmptyState
-              icone={ArrowPathIcon}
-              titulo="Nenhuma recorrência"
-              descricao="Toque em Receita ou Despesa acima para criar uma regra, como salário ou aluguel."
-            />
+            erroCarregamento ? (
+              <EmptyState icone={SignalSlashIcon} titulo="Sem conexão" descricao="Não foi possível carregar as recorrências." />
+            ) : (
+              <EmptyState
+                icone={ArrowPathIcon}
+                titulo="Nenhuma recorrência"
+                descricao="Toque em Receita ou Despesa acima para criar uma regra, como salário ou aluguel."
+              />
+            )
           ) : (
             <div className="rounded-2xl border border-border bg-surface-raised p-2 divide-y divide-border">
               {recorrencias.map((r) => (
@@ -201,11 +207,15 @@ const Home = ({
             </div>
           )
         ) : recentes.length === 0 ? (
-          <EmptyState
-            icone={InboxIcon}
-            titulo="Nenhuma transação ainda"
-            descricao="Toque em Receita ou Despesa para registrar a primeira."
-          />
+          erroCarregamento ? (
+            <EmptyState icone={SignalSlashIcon} titulo="Sem conexão" descricao="Não foi possível carregar as transações." />
+          ) : (
+            <EmptyState
+              icone={InboxIcon}
+              titulo="Nenhuma transação ainda"
+              descricao="Toque em Receita ou Despesa para registrar a primeira."
+            />
+          )
         ) : (
           <div className="rounded-2xl border border-border bg-surface-raised p-2 divide-y divide-border">
             {recentes.map((t) => (

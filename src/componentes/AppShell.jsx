@@ -7,6 +7,7 @@ import IconButton from './ui/IconButton.jsx';
 import BottomNavigation from './BottomNavigation.jsx';
 import DesktopNavigation from './DesktopNavigation.jsx';
 import ConfirmDialog from './ui/ConfirmDialog.jsx';
+import PWAController from './PWAController.jsx';
 
 // Mesmo corte de breakpoint (1024px) que decide header mobile vs. DesktopNavigation
 // flutuante e BottomNavigation — o Toaster segue a mesma divisão pra não colidir
@@ -64,7 +65,7 @@ const AppShell = ({ home, movimentacoes, cartoes, metas, activeSection, onNavega
     <div className="min-h-dvh bg-background text-foreground pb-24 lg:pb-8 lg:pt-24">
       {/* Header full-width é só pra mobile/tablet — no desktop a navegação inteira
           (incl. tema/logout) vive dentro da DesktopNavigation flutuante abaixo. */}
-      <header className="lg:hidden sticky top-0 z-30 bg-surface-raised border-b border-border">
+      <header className="lg:hidden sticky top-0 z-30 bg-surface-raised border-b border-border pt-safe">
         <div className="px-4 h-14 flex items-center justify-between">
           <p className="font-semibold text-sm">Dashboard Financeiro</p>
 
@@ -93,9 +94,11 @@ const AppShell = ({ home, movimentacoes, cartoes, metas, activeSection, onNavega
       <main>{renderSecao()}</main>
 
       <BottomNavigation ativo={activeSection} aoNavegar={onNavegar} />
+      <PWAController />
       <Toaster
         position={ehDesktop ? 'top-right' : 'bottom-center'}
-        offset={ehDesktop ? 24 : 88}
+        offset={24}
+        mobileOffset={{ bottom: 'calc(88px + env(safe-area-inset-bottom))', left: '16px', right: '16px' }}
         theme={temaEscuro ? 'dark' : 'light'}
         toastOptions={{
           style: {

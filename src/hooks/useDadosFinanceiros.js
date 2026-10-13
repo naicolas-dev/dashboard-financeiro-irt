@@ -99,6 +99,11 @@ export function useDadosFinanceiros(usuario) {
   const [comprasCartao, setComprasCartao] = useState([]);
   const [parcelasCartao, setParcelasCartao] = useState([]);
   const [carregando, setCarregando] = useState(true);
+  // true quando o carregamento inicial falhou (tipicamente offline) — distingue
+  // "sem dados de verdade" de "não consegui carregar os dados", pra Home/
+  // Movimentações/Cartões/Metas não mostrarem R$0/listas vazias como se fosse
+  // informação financeira real.
+  const [erroCarregamento, setErroCarregamento] = useState(false);
 
   const [dataInicio, setDataInicio] = useState(null);
   const [dataFim, setDataFim] = useState(null);
@@ -124,6 +129,23 @@ export function useDadosFinanceiros(usuario) {
 
     const carregarDadosIniciais = async () => {
       setCarregando(true);
+      setErroCarregamento(false);
+
+      // O SDK do Firestore não rejeita a Promise quando está offline — ele cai
+      // em "modo offline" por conta própria e resolve com o que tiver no cache
+      // em memória (vazio, já que este projeto não habilita persistence), como
+      // se fosse uma leitura bem-sucedida de verdade. Sem este check, um
+      // carregamento inicial offline parecia "sem dados" em vez de "sem
+      // conexão" (achado real ao testar, não só suposição). `navigator.onLine`
+      // raramente erra pro lado de dizer "offline" quando na verdade está
+      // online — é o sinal mais confiável disponível sem reestruturar pra
+      // onSnapshot/metadata.fromCache.
+      if (!navigator.onLine) {
+        setCarregando(false);
+        setErroCarregamento(true);
+        return;
+      }
+
       try {
         const inicio = inicioPadrao();
         janelaInicioRef.current = inicio;
@@ -162,6 +184,7 @@ export function useDadosFinanceiros(usuario) {
       } catch (erro) {
         console.error('Erro ao carregar os dados financeiros:', erro);
         toast.error('Não foi possível carregar seus dados.');
+        if (ativo) setErroCarregamento(true);
       } finally {
         if (ativo) setCarregando(false);
       }
@@ -540,6 +563,7 @@ export function useDadosFinanceiros(usuario) {
     comprasCartao,
     parcelasCartao,
     carregando,
+    erroCarregamento,
     transacoesFiltradas,
     filtros: { dataInicio, dataFim, filtroCategoria, filtroTipo },
     setters: { setDataInicio, setDataFim, setFiltroCategoria, setFiltroTipo },

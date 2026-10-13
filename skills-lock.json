@@ -14,6 +14,18 @@
       "sourceType": "github",
       "skillPath": "skills/chakra-ui-refactor/SKILL.md",
       "computedHash": "9c6bdd94e0c36455ac4a8623bd3e9e23e357ad8c066fbf3e458fe09ed02668d5"
+    },
+    "progressive-web-app": {
+      "source": "sickn33/agentic-awesome-skills",
+      "sourceType": "github",
+      "skillPath": "skills/progressive-web-app/SKILL.md",
+      "computedHash": "d603316c47c9951fe879fb4d28f4d8f67d36289e35c88029b1f6b6aa5f03ed5c"
+    },
+    "pwa-review": {
+      "source": "NexFabric/pwa-review-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "a6eb199d20580c02b7ef76ce4dc285dfbb8160f8302754886ae0105d0de69883"
     }
   }
 }

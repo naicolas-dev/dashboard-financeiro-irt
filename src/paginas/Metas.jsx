@@ -35,7 +35,16 @@ function AdicionarMetaTile({ onClick }) {
 // Guardar/retirar dinheiro NUNCA cria transação — só move `valorReservado` da
 // própria meta. `saldoDisponivel`/`totalReservadoMetas` vêm prontos do hook (mesma
 // fonte de saldo que a Home usa, sem fórmula duplicada aqui).
-const Metas = ({ metas, carregando, saldoDisponivel, totalReservadoMetas, handleMetaSalva, handleMetaAtualizada, excluirMeta }) => {
+const Metas = ({
+  metas,
+  carregando,
+  erroCarregamento,
+  saldoDisponivel,
+  totalReservadoMetas,
+  handleMetaSalva,
+  handleMetaAtualizada,
+  excluirMeta,
+}) => {
   const [novaMetaAberta, setNovaMetaAberta] = useState(false);
   const [metaEditando, setMetaEditando] = useState(null);
   const [acaoValor, setAcaoValor] = useState(null); // { meta, modo: 'guardar' | 'retirar' }
@@ -45,8 +54,10 @@ const Metas = ({ metas, carregando, saldoDisponivel, totalReservadoMetas, handle
       <div>
         <h1 className="text-xl font-semibold text-foreground">Metas</h1>
         {!carregando && metas.length === 0 && (
-          <p className="text-sm text-foreground-secondary mt-1">
-            Nenhuma meta criada. Crie uma meta para separar dinheiro para um objetivo.
+          <p className={`text-sm mt-1 ${erroCarregamento ? 'text-warning' : 'text-foreground-secondary'}`}>
+            {erroCarregamento
+              ? 'Sem conexão — não foi possível carregar suas metas.'
+              : 'Nenhuma meta criada. Crie uma meta para separar dinheiro para um objetivo.'}
           </p>
         )}
       </div>
@@ -54,11 +65,15 @@ const Metas = ({ metas, carregando, saldoDisponivel, totalReservadoMetas, handle
       <div className="flex items-center gap-8">
         <div>
           <p className="text-sm text-foreground-secondary">Disponível para guardar</p>
-          <p className="text-2xl font-semibold tabular-nums text-foreground">{formatadorMoeda.format(saldoDisponivel)}</p>
+          <p className="text-2xl font-semibold tabular-nums text-foreground">
+            {erroCarregamento ? '—' : formatadorMoeda.format(saldoDisponivel)}
+          </p>
         </div>
         <div>
           <p className="text-sm text-foreground-secondary">Reservado</p>
-          <p className="text-2xl font-semibold tabular-nums text-foreground">{formatadorMoeda.format(totalReservadoMetas)}</p>
+          <p className="text-2xl font-semibold tabular-nums text-foreground">
+            {erroCarregamento ? '—' : formatadorMoeda.format(totalReservadoMetas)}
+          </p>
         </div>
       </div>
 

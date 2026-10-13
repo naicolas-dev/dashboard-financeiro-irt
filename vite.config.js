@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { VitePWA } from 'vite-plugin-pwa';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -63,6 +64,54 @@ export default defineConfig(({ command, mode }) => {
   }
 
   return {
-    plugins: [react(), tailwindcss(), apiDevPlugin()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      apiDevPlugin(),
+      VitePWA({
+        registerType: 'prompt',
+        strategies: 'generateSW',
+        // Sem favicon.svg — a fonte (public/ico.png) é PNG, o gerador só produz um
+        // SVG de verdade quando a fonte já é SVG. includeAssets só garante que
+        // esses arquivos entrem no precache; os <link> do <head> são manuais em
+        // index.html (a integração automática é experimental, não estamos usando).
+        includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png'],
+        manifest: {
+          id: '/',
+          name: 'Dashboard Financeiro',
+          short_name: 'Finanças',
+          description: 'Dashboard financeiro pessoal — receitas, despesas, cartões e metas.',
+          lang: 'pt-BR',
+          start_url: '/',
+          scope: '/',
+          display: 'standalone',
+          // Light — é o tema default quando não há preferência salva (ver script
+          // inline em index.html). Fallback estático só; em runtime o
+          // <meta name="theme-color"> é sincronizado pelo PWAController com o
+          // TemaContext, que continua a única autoridade de tema.
+          background_color: '#f7f6f2',
+          theme_color: '#f7f6f2',
+          categories: ['finance', 'productivity'],
+          icons: [
+            { src: 'pwa-64x64.png', sizes: '64x64', type: 'image/png' },
+            { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+            { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+            { src: 'maskable-icon-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          ],
+        },
+        workbox: {
+          globPatterns: ['**/*.{html,js,css,png,svg,ico,webp,woff2}'],
+          cleanupOutdatedCaches: true,
+          // /api/** precisa ficar fora do fallback de navegação do SW — não tem
+          // tratamento offline próprio (comportamento esperado, igual hoje).
+          navigateFallbackDenylist: [/^\/api\//],
+          // Sem runtimeCaching nenhum — nada de /api, Firebase Auth, Firestore,
+          // googleapis. O SW cuida só do app shell e assets estáticos.
+        },
+        // PWA só é validada via `npm run build` + `npm run preview` — não ativar
+        // o SW durante o dev cotidiano.
+        devOptions: { enabled: false },
+      }),
+    ],
   };
 });
