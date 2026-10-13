@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotionConfig } from 'motion/react';
 
 const MotionDiv = motion.div;
 
@@ -23,6 +23,7 @@ function useEhDesktop() {
 
 const ResponsiveDialog = ({ aberto, aoFechar, titulo, children }) => {
   const ehDesktop = useEhDesktop();
+  const reduzirMovimento = useReducedMotionConfig();
   const dialogRef = useRef(null);
 
   useEffect(() => {
@@ -47,11 +48,15 @@ const ResponsiveDialog = ({ aberto, aoFechar, titulo, children }) => {
         exit: { opacity: 0, scale: 0.97 },
         transition: { duration: 0.18 },
       }
-    : {
-        initial: { y: '100%' },
-        animate: { y: 0 },
-        exit: { y: '100%' },
-        transition: { type: 'spring', stiffness: 380, damping: 36 },
+    : // `transform` inteiro (não `y`): no Motion só `transform`/`opacity` vão pro
+      // compositor — `y` é recalculado em JS a cada frame e travava a sheet
+      // justamente enquanto o conteúdo (ex.: keypad) monta. Tween curto, sem spring.
+      // O MotionConfig global não cobre `transform` explícito, por isso o
+      // reduced-motion é aplicado aqui à mão.
+      {
+        initial: { transform: 'translateY(100%)' },
+        animate: { transform: 'translateY(0%)', transition: { duration: reduzirMovimento ? 0 : 0.24, ease: [0.32, 0.72, 0, 1] } },
+        exit: { transform: 'translateY(100%)', transition: { duration: reduzirMovimento ? 0 : 0.18, ease: [0.4, 0, 1, 1] } },
       };
 
   return (

@@ -119,6 +119,18 @@ body {
   font-family: var(--font-sans);
 }
 
+/* Rótulo do item ativo da BottomNavigation — só opacity/transform (compositor),
+   no lugar do `layout` do Motion que media os botões a cada troca de seção. */
+@keyframes rotulo-nav-entrar {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+}
+.rotulo-nav-entrar {
+  animation: rotulo-nav-entrar 160ms ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

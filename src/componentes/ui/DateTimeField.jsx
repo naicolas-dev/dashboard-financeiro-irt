@@ -43,13 +43,25 @@ const DateTimeField = ({ label, value, onChange, id }) => {
         </label>
       )}
       <div className="grid grid-cols-2 gap-2">
-        <DatePicker.Root value={dataSelecionada} onValueChange={aoMudarData} closeOnSelect>
+        {/* lazyMount/unmountOnExit: fechado, o calendário (dia/mês/ano) era quase
+            metade dos nós da tela de detalhes — agora só existe enquanto aberto. */}
+        <DatePicker.Root
+          value={dataSelecionada}
+          onValueChange={aoMudarData}
+          closeOnSelect
+          lazyMount
+          unmountOnExit
+          locale="pt-BR"
+          positioning={{ placement: 'bottom-start' }}
+        >
           <DatePicker.Control className="relative">
             <DatePicker.Input
               id={id}
               className="focus-ring w-full h-11 px-3.5 pr-9 rounded-xl bg-surface-raised text-foreground border border-border outline-none text-sm"
             />
-            <DatePicker.IndicatorGroup className="absolute right-3 top-1/2 -translate-y-1/2">
+            {/* transform-none: o recipe do Chakra já aplica translateY(-50%) aqui;
+                somado ao -translate-y-1/2 do Tailwind o ícone subia 12px. */}
+            <DatePicker.IndicatorGroup className="absolute right-3 top-1/2 -translate-y-1/2 transform-none">
               <DatePicker.Trigger className="focus-ring cursor-pointer text-foreground-muted">
                 <CalendarDaysIcon className="h-4 w-4" />
               </DatePicker.Trigger>

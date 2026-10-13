@@ -1,6 +1,7 @@
 import { StrictMode, lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChakraProvider } from '@chakra-ui/react';
+import { MotionConfig } from 'motion/react';
 import '@fontsource-variable/inter';
 import './index.css';
 import App from './App.jsx';
@@ -20,13 +21,17 @@ createRoot(document.getElementById('root')).render(
         <DesignLab />
       </Suspense>
     ) : (
-      <AuthProvider>
-        <TemaProvider>
-          <ChakraProvider value={chakraSystem}>
-            <App />
-          </ChakraProvider>
-        </TemaProvider>
-      </AuthProvider>
+      // A regra de prefers-reduced-motion do index.css só alcança animação CSS;
+      // animações do Motion (JS) precisam deste opt-in pra respeitá-la também.
+      <MotionConfig reducedMotion="user">
+        <AuthProvider>
+          <TemaProvider>
+            <ChakraProvider value={chakraSystem}>
+              <App />
+            </ChakraProvider>
+          </TemaProvider>
+        </AuthProvider>
+      </MotionConfig>
     )}
   </StrictMode>
 );

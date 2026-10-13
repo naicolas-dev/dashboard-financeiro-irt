@@ -73,7 +73,10 @@ const Home = ({
     );
     observer.observe(elemento);
     return () => observer.disconnect();
-  }, []);
+    // `carregando` troca o Hero pelo skeleton e de volta, recriando o sentinel —
+    // sem reanexar, o observer ficava preso no nó antigo (desanexado) e travava
+    // `recolhido` no último valor.
+  }, [carregando]);
 
   const resumo = useMemo(() => {
     const receitas = transacoes.filter((t) => t.tipo === 'receita').reduce((acc, t) => acc + t.valor, 0);
