@@ -36,3 +36,6 @@ yarn-error.log*
 
 .vercel
 .env*
+
+# Saídas locais da migração Cartões V2 (contêm dados financeiros)
+scripts/cartoes-v2/.saida/

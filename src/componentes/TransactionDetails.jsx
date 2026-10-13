@@ -7,7 +7,7 @@ import SelectField from './ui/SelectField';
 import ComboboxField from './ui/ComboboxField';
 import DateTimeField from './ui/DateTimeField';
 import { CATEGORIAS_TRANSACAO } from '../constantes/categorias.js';
-import { gerarValoresParcelas, calcularPrimeiraCompetencia, nomeCompetencia, rotuloParcelas } from '../servicos/cartoes.js';
+import { gerarValoresParcelas, calcularPrimeiraCompetencia, nomeFatura, rotuloParcelas } from '../servicos/cartoes.js';
 
 const formatadorMoeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -38,7 +38,6 @@ const TransactionDetails = ({
   modoEdicao = false,
   excluindo = false,
   onExcluir,
-  infoParcelaCartao,
   cartoes,
   formaPagamento,
   setFormaPagamento,
@@ -78,23 +77,7 @@ const TransactionDetails = ({
         <div className="w-12" aria-hidden="true" />
       </div>
 
-      {modoEdicao && infoParcelaCartao && (
-        <div className="rounded-xl bg-surface p-3 text-sm space-y-1.5">
-          <p className="text-foreground-secondary">
-            Parcela {infoParcelaCartao.parcelaAtual}/{infoParcelaCartao.totalParcelas} de {infoParcelaCartao.cartaoNome} — editar
-            aqui altera só esta parcela
-          </p>
-          <div className="flex items-center justify-between tabular-nums">
-            <span className="text-foreground">{tipo === 'receita' ? 'Receita' : 'Despesa'}</span>
-            <span className="font-semibold text-foreground">{formatadorMoeda.format(valorNumerico)}</span>
-          </div>
-          <p className="text-foreground-muted text-xs">
-            {new Date(data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
-          </p>
-        </div>
-      )}
-
-      {modoEdicao && !infoParcelaCartao && (
+      {modoEdicao && (
         <div className="grid grid-cols-2 gap-3">
           <SelectField id="tipo-transacao" label="Tipo" value={tipo} onChange={setTipo} opcoes={OPCOES_TIPO} />
           <Input
@@ -117,7 +100,7 @@ const TransactionDetails = ({
 
       <Input label="Descrição" placeholder="Ex: Mercado" value={descricao} onChange={(e) => setDescricao(e.target.value)} />
 
-      {!infoParcelaCartao && <DateTimeField id="data-transacao" label="Data e hora" value={data} onChange={setData} />}
+<DateTimeField id="data-transacao" label="Data e hora" value={data} onChange={setData} />
 
       {tipo === 'despesa' && !modoEdicao && (
         <div className="space-y-3">
@@ -208,7 +191,10 @@ const TransactionDetails = ({
                     </p>
                     <p className="text-foreground-secondary">Total {formatadorMoeda.format(valorNumerico)}</p>
                     <p className="text-foreground-muted text-xs">
-                      Primeira fatura: {nomeCompetencia(calcularPrimeiraCompetencia(data, cartaoSelecionado.diaFechamento))}
+                      Primeira fatura: {nomeFatura(calcularPrimeiraCompetencia(new Date(data), cartaoSelecionado.diaFechamento), cartaoSelecionado)}
+                    </p>
+                    <p className="text-foreground-muted text-xs">
+                      Vira dívida no cartão — o saldo só muda quando você pagar a fatura.
                     </p>
                   </div>
                 ))}

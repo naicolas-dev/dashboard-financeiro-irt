@@ -2,7 +2,16 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { collection, query, orderBy, where, getDocs, doc, deleteDoc, addDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { db } from '../firebase/configuracao';
-import { buscarParcelasDeCartao, excluirCompraComParcelas, excluirComprasComParcelasEmLote } from '../servicos/cartoes.js';
+import { buscarPagamentosDeFatura, excluirCompraCartao, excluirComprasCartaoEmLote } from '../servicos/cartoes.js';
+import {
+  movimentacoesDeCaixa,
+  parcelasDaCompra,
+  resumoDoCartao,
+  regrasDaCompra,
+  faturasDoCartao,
+  maximoPagamentoCentavos,
+  paraReais,
+} from '../dominio/cartoes.js';
 
 const MESES_DE_HISTORICO_PADRAO = 12;
 
@@ -92,12 +101,14 @@ async function processarRecorrenciasDevidas(recorrencias) {
 // o cache de intervalo de datas e a sincronização do estado local depois de cada
 // escrita ficam todos aqui — App.jsx passa a só compor a interface.
 export function useDadosFinanceiros(usuario) {
-  const [transacoes, setTransacoes] = useState([]);
+  // `transacoesCarregadas` = documentos crus da janela; tudo que o resto do app vê
+  // passa por `movimentacoesDeCaixa` (logo abaixo) — ponto único da regra.
+  const [transacoesCarregadas, setTransacoes] = useState([]);
   const [metas, setMetas] = useState([]);
   const [recorrencias, setRecorrencias] = useState([]);
   const [cartoesBase, setCartoesBase] = useState([]);
   const [comprasCartao, setComprasCartao] = useState([]);
-  const [parcelasCartao, setParcelasCartao] = useState([]);
+  const [pagamentosFatura, setPagamentosFatura] = useState([]);
   const [carregando, setCarregando] = useState(true);
   // true quando o carregamento inicial falhou (tipicamente offline) — distingue
   // "sem dados de verdade" de "não consegui carregar os dados", pra Home/
@@ -120,7 +131,7 @@ export function useDadosFinanceiros(usuario) {
       setRecorrencias([]);
       setCartoesBase([]);
       setComprasCartao([]);
-      setParcelasCartao([]);
+      setPagamentosFatura([]);
       setCarregando(false);
       return;
     }
@@ -152,17 +163,17 @@ export function useDadosFinanceiros(usuario) {
         const fim = new Date();
         fim.setDate(fim.getDate() + 1);
 
-        const [transacoesCarregadas, metasCarregadas, recorrenciasCarregadas, cartoesCarregados, comprasCartaoCarregadas, parcelasCartaoCarregadas] =
+        const [transacoesDaJanela, metasCarregadas, recorrenciasCarregadas, cartoesCarregados, comprasCartaoCarregadas, pagamentosCarregados] =
           await Promise.all([
             buscarTransacoesEntre(inicio, fim),
             buscarTodos('metas'),
             buscarTodos('transacoesRecorrentes'),
             buscarTodos('cartoes'),
             buscarTodos('comprasCartao'),
-            buscarParcelasDeCartao(),
+            buscarPagamentosDeFatura(),
           ]);
 
-        let transacoesFinais = transacoesCarregadas;
+        let transacoesFinais = transacoesDaJanela;
         let recorrenciasFinais = recorrenciasCarregadas;
 
         if (!recorrenciasProcessadas.current) {
@@ -180,7 +191,7 @@ export function useDadosFinanceiros(usuario) {
         setRecorrencias(recorrenciasFinais);
         setCartoesBase(cartoesCarregados);
         setComprasCartao(comprasCartaoCarregadas);
-        setParcelasCartao(parcelasCartaoCarregadas);
+        setPagamentosFatura(pagamentosCarregados);
       } catch (erro) {
         console.error('Erro ao carregar os dados financeiros:', erro);
         toast.error('Não foi possível carregar seus dados.');
@@ -216,6 +227,10 @@ export function useDadosFinanceiros(usuario) {
 
     janelaInicioRef.current = inicioDesejado;
   }, [usuario, dataInicio]);
+
+  // Livro-caixa: o que o app inteiro (saldo, Home, Movimentações) enxerga como
+  // `transacoes`. Parcelas legadas do modelo antigo, se existirem, ficam de fora.
+  const transacoes = useMemo(() => movimentacoesDeCaixa(transacoesCarregadas), [transacoesCarregadas]);
 
   const transacoesFiltradas = useMemo(() => {
     return transacoes.filter((t) => {
@@ -282,16 +297,22 @@ export function useDadosFinanceiros(usuario) {
     });
   }, []);
 
+  // Pagamento de fatura também é uma transação (a saída de caixa real): excluir
+  // devolve o valor ao saldo e a dívida volta a aparecer — tudo por derivação.
   const excluirTransacao = useCallback(
-    (id) =>
-      confirmarExclusao({
-        titulo: 'Excluir transação?',
-        descricao: 'Esta transação será removida permanentemente.',
+    (id) => {
+      const ehPagamento = pagamentosFatura.some((p) => p.id === id);
+      return confirmarExclusao({
+        titulo: ehPagamento ? 'Excluir pagamento de fatura?' : 'Excluir transação?',
+        descricao: ehPagamento
+          ? 'O valor volta para o saldo e a dívida do cartão aumenta de novo.'
+          : 'Esta transação será removida permanentemente.',
         acao: async () => {
           try {
             await deleteDoc(doc(db, 'transacoes', id));
             setTransacoes((prev) => prev.filter((t) => t.id !== id));
-            toast.success('Transação excluída');
+            if (ehPagamento) setPagamentosFatura((prev) => prev.filter((p) => p.id !== id));
+            toast.success(ehPagamento ? 'Pagamento excluído' : 'Transação excluída');
             return true;
           } catch (erro) {
             console.error('Erro ao excluir:', erro);
@@ -299,8 +320,9 @@ export function useDadosFinanceiros(usuario) {
             return false;
           }
         },
-      }),
-    [confirmarExclusao]
+      });
+    },
+    [confirmarExclusao, pagamentosFatura]
   );
 
   const handleMetaAtualizada = useCallback((metaAtualizada) => {
@@ -399,25 +421,66 @@ export function useDadosFinanceiros(usuario) {
     [confirmarExclusao]
   );
 
-  // Comprometido = soma de `valorTotal` das compras do cartão (não das parcelas
-  // individuais) — nada reduz esse valor ainda (sem pagamento/liberação de fatura
-  // neste slice, por decisão consciente: ver seção "Limite" da spec de Cartões).
-  const comprometidoPorCartao = useMemo(() => {
-    const mapa = {};
-    for (const compra of comprasCartao) {
-      mapa[compra.cartaoId] = (mapa[compra.cartaoId] || 0) + compra.valorTotal;
-    }
-    return mapa;
-  }, [comprasCartao]);
-
-  const cartoes = useMemo(
+  // Parcelas são DERIVADAS das compras (nada gravado em `transacoes`). Mesmo formato
+  // que a UI já consumia (valor em reais, competência, parcelaAtual/totalParcelas).
+  const parcelasCartao = useMemo(
     () =>
-      cartoesBase.map((cartao) => ({
-        ...cartao,
-        limiteDisponivel: cartao.limiteTotal - (comprometidoPorCartao[cartao.id] || 0),
+      comprasCartao.flatMap(parcelasDaCompra).map((p) => ({
+        ...p,
+        valor: paraReais(p.centavos),
+        valorTotalCompra: paraReais(p.valorTotalCompraCentavos),
       })),
-    [cartoesBase, comprometidoPorCartao]
+    [comprasCartao]
   );
+
+  // Dívida, fatura atual, próximas parcelas e limite disponível: tudo derivado pelo
+  // domínio a partir de compras + pagamentos (nenhum contador gravado).
+  const cartoes = useMemo(() => {
+    const hoje = new Date();
+    return cartoesBase.map((cartao) => {
+      const resumo = resumoDoCartao({ cartao, compras: comprasCartao, pagamentos: pagamentosFatura, hoje });
+      return {
+        ...cartao,
+        resumo,
+        divida: paraReais(resumo.dividaCentavos),
+        limiteDisponivel: paraReais(resumo.limiteDisponivelCentavos),
+      };
+    });
+  }, [cartoesBase, comprasCartao, pagamentosFatura]);
+
+  const regrasCompra = useCallback(
+    (compra) => {
+      const cartao = cartoesBase.find((c) => c.id === compra.cartaoId);
+      if (!cartao) return { podeAlterarValor: true, podeExcluir: true, temHistorico: false, aviso: null };
+      return regrasDaCompra({ compra, cartao, compras: comprasCartao, pagamentos: pagamentosFatura, hoje: new Date() });
+    },
+    [cartoesBase, comprasCartao, pagamentosFatura]
+  );
+
+  // Tudo que o diálogo de pagamento precisa saber sobre uma fatura. Na edição, o
+  // próprio pagamento sai da conta (restante e máximo como se ele não existisse).
+  const contextoPagamento = useCallback(
+    ({ cartaoId, competencia, ignorarPagamentoId }) => {
+      const cartao = cartoes.find((c) => c.id === cartaoId);
+      if (!cartao) return null;
+      const hoje = new Date();
+      const pagamentos = ignorarPagamentoId ? pagamentosFatura.filter((p) => p.id !== ignorarPagamentoId) : pagamentosFatura;
+      const { faturas } = faturasDoCartao({ cartao, compras: comprasCartao, pagamentos, hoje });
+      return {
+        cartao,
+        restanteFaturaCentavos: faturas.find((f) => f.competencia === competencia)?.restanteCentavos ?? 0,
+        maximoCentavos: maximoPagamentoCentavos({ cartao, compras: comprasCartao, pagamentos, hoje, competencia }),
+      };
+    },
+    [cartoes, comprasCartao, pagamentosFatura]
+  );
+
+  // Pagamento é ao mesmo tempo caixa (`transacoes`) e redutor de dívida
+  // (`pagamentosFatura`, sem janela) — os dois estados andam juntos.
+  const handlePagamentoSalvo = useCallback((pagamento) => {
+    setPagamentosFatura((prev) => [...prev.filter((p) => p.id !== pagamento.id), pagamento]);
+    setTransacoes((prev) => ordenarPorDataDesc([...prev.filter((t) => t.id !== pagamento.id), pagamento]));
+  }, []);
 
   const handleCartaoSalvo = useCallback((cartaoSalvo) => {
     setCartoesBase((prev) => {
@@ -426,19 +489,9 @@ export function useDadosFinanceiros(usuario) {
     });
   }, []);
 
-  // `parcelasCartao` nunca é recortado por data (fatura/extrato de cartão não podem
-  // perder parcelas futuras/antigas); `transacoes` continua só "caixa realizado" —
-  // só entram aí as parcelas que já caberiam na janela de 12 meses de qualquer forma.
-  const handleCompraCriada = useCallback((compra, parcelas) => {
+  // Compra no cartão não toca o caixa: só entra em `comprasCartao`.
+  const handleCompraCriada = useCallback((compra) => {
     setComprasCartao((prev) => [...prev, compra]);
-    setParcelasCartao((prev) => [...prev, ...parcelas]);
-
-    const limiteJanela = new Date();
-    limiteJanela.setDate(limiteJanela.getDate() + 1);
-    const parcelasNaJanela = parcelas.filter((p) => new Date(p.data) <= limiteJanela);
-    if (parcelasNaJanela.length > 0) {
-      setTransacoes((prev) => ordenarPorDataDesc([...prev, ...parcelasNaJanela]));
-    }
   }, []);
 
   // Sem ida ao Firestore pra checar o bloqueio — `comprasCartao` já está carregado
@@ -451,6 +504,10 @@ export function useDadosFinanceiros(usuario) {
         // Toast, não diálogo — é um aviso ("não dá pra fazer isso agora"), não uma
         // pergunta que precisa de confirmação como os excluir de verdade.
         toast.error('Este cartão possui compras vinculadas. Exclua as compras antes de remover o cartão.');
+        return false;
+      }
+      if (pagamentosFatura.some((p) => p.cartaoId === cartao.id)) {
+        toast.error('Este cartão possui pagamentos de fatura registrados e não pode ser removido.');
         return false;
       }
 
@@ -471,23 +528,21 @@ export function useDadosFinanceiros(usuario) {
         },
       });
     },
-    [comprasCartao, confirmarExclusao]
+    [comprasCartao, pagamentosFatura, confirmarExclusao]
   );
 
+  // Permitido mesmo com fatura fechada/paga (pode ter sido lançamento errado), mas a
+  // confirmação deixa claro o efeito: o total das faturas muda, pagamentos não.
   const excluirCompra = useCallback(
-    (compra) =>
-      confirmarExclusao({
+    (compra) => {
+      const regras = regrasCompra(compra);
+      return confirmarExclusao({
         titulo: 'Excluir compra?',
-        descricao: 'A compra e todas as parcelas vinculadas serão removidas.',
+        descricao: regras.aviso ?? 'A compra e as parcelas dela saem da fatura.',
         acao: async () => {
-          const parcelaIds = parcelasCartao.filter((p) => p.compraCartaoId === compra.id).map((p) => p.id);
-
           try {
-            await excluirCompraComParcelas(compra.id, parcelaIds);
+            await excluirCompraCartao(compra.id);
             setComprasCartao((prev) => prev.filter((c) => c.id !== compra.id));
-            const idsRemovidos = new Set(parcelaIds);
-            setParcelasCartao((prev) => prev.filter((p) => !idsRemovidos.has(p.id)));
-            setTransacoes((prev) => prev.filter((t) => !idsRemovidos.has(t.id)));
             toast.success('Compra excluída');
             return true;
           } catch (erro) {
@@ -496,26 +551,25 @@ export function useDadosFinanceiros(usuario) {
             return false;
           }
         },
-      }),
-    [parcelasCartao, confirmarExclusao]
+      });
+    },
+    [regrasCompra, confirmarExclusao]
   );
 
   const excluirVariasCompras = useCallback(
-    (compras) =>
-      confirmarExclusao({
+    (compras) => {
+      const comHistorico = compras.filter((c) => regrasCompra(c).temHistorico).length;
+      return confirmarExclusao({
         titulo: `Excluir ${compras.length} ${compras.length === 1 ? 'compra' : 'compras'}?`,
-        descricao: 'Todas as compras selecionadas e suas parcelas vinculadas serão removidas.',
+        descricao:
+          comHistorico > 0
+            ? `${comHistorico === 1 ? '1 delas já tem' : `${comHistorico} delas já têm`} parcela em fatura fechada ou paga — o total dessas faturas muda; os pagamentos já registrados continuam como estão.`
+            : 'As compras selecionadas e as parcelas delas saem das faturas.',
         acao: async () => {
-          const compraIds = compras.map((c) => c.id);
-          const idsCompras = new Set(compraIds);
-          const parcelaIds = parcelasCartao.filter((p) => idsCompras.has(p.compraCartaoId)).map((p) => p.id);
-
+          const idsCompras = new Set(compras.map((c) => c.id));
           try {
-            await excluirComprasComParcelasEmLote(compraIds, parcelaIds);
+            await excluirComprasCartaoEmLote([...idsCompras]);
             setComprasCartao((prev) => prev.filter((c) => !idsCompras.has(c.id)));
-            const idsParcelas = new Set(parcelaIds);
-            setParcelasCartao((prev) => prev.filter((p) => !idsParcelas.has(p.id)));
-            setTransacoes((prev) => prev.filter((t) => !idsParcelas.has(t.id)));
             toast.success('Compras excluídas');
             return true;
           } catch (erro) {
@@ -524,35 +578,14 @@ export function useDadosFinanceiros(usuario) {
             return false;
           }
         },
-      }),
-    [parcelasCartao, confirmarExclusao]
+      });
+    },
+    [regrasCompra, confirmarExclusao]
   );
 
-  // Sincroniza o resultado de `atualizarCompraCartao`: se reestruturou (veio
-  // `parcelasNovas`), troca as parcelas antigas pelas novas em `parcelasCartao` (sem
-  // recorte) e em `transacoes` (só as que já caberiam na janela de 12 meses, mesmo
-  // critério de sempre). Se foi só descrição/categoria, atualiza só esses campos nas
-  // parcelas existentes, sem tocar em `data`/`competencia`/`valor`.
-  const handleCompraAtualizada = useCallback((resultado) => {
-    setComprasCartao((prev) => prev.map((c) => (c.id === resultado.compra.id ? resultado.compra : c)));
-
-    if (resultado.parcelasNovas) {
-      const idsRemovidos = new Set(resultado.parcelasRemovidasIds);
-      setParcelasCartao((prev) => [...prev.filter((p) => !idsRemovidos.has(p.id)), ...resultado.parcelasNovas]);
-
-      const limiteJanela = new Date();
-      limiteJanela.setDate(limiteJanela.getDate() + 1);
-      const novasNaJanela = resultado.parcelasNovas.filter((p) => new Date(p.data) <= limiteJanela);
-      setTransacoes((prev) => ordenarPorDataDesc([...prev.filter((t) => !idsRemovidos.has(t.id)), ...novasNaJanela]));
-    } else {
-      const { descricao, categoria } = resultado.compra;
-      setParcelasCartao((prev) =>
-        prev.map((p) => (p.compraCartaoId === resultado.compra.id ? { ...p, descricao, categoria } : p))
-      );
-      setTransacoes((prev) =>
-        prev.map((t) => (t.compraCartaoId === resultado.compra.id ? { ...t, descricao, categoria } : t))
-      );
-    }
+  // Parcelas são derivadas da compra — basta trocar o documento.
+  const handleCompraAtualizada = useCallback((compraAtualizada) => {
+    setComprasCartao((prev) => prev.map((c) => (c.id === compraAtualizada.id ? compraAtualizada : c)));
   }, []);
 
   return {
@@ -575,7 +608,12 @@ export function useDadosFinanceiros(usuario) {
     handleMetaExcluida,
     excluirMeta,
     totalReservadoMetas,
+    saldoFinanceiro,
     saldoDisponivel,
+    pagamentosFatura,
+    handlePagamentoSalvo,
+    regrasCompra,
+    contextoPagamento,
     handleRecorrenciaSalva,
     handleRecorrenciaExcluida,
     excluirRecorrencia,

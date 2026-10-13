@@ -5,6 +5,8 @@ import RecurrenceRow from '../componentes/RecurrenceRow.jsx';
 import ResponsiveDialog from '../componentes/ui/ResponsiveDialog.jsx';
 import TransactionFlow from '../componentes/TransactionFlow.jsx';
 import RecurrenceFlow from '../componentes/RecurrenceFlow.jsx';
+import InvoicePaymentDialog from '../componentes/InvoicePaymentDialog.jsx';
+import { ehPagamentoDeFatura } from '../dominio/cartoes.js';
 import EmptyState from '../componentes/ui/EmptyState.jsx';
 import Skeleton from '../componentes/ui/Skeleton.jsx';
 import ComboboxField from '../componentes/ui/ComboboxField.jsx';
@@ -56,6 +58,10 @@ const Movimentacoes = ({
   handleRecorrenciaSalva,
   excluirRecorrencia,
   cartoes,
+  saldoFinanceiro,
+  saldoDisponivel,
+  handlePagamentoSalvo,
+  contextoPagamento,
 }) => {
   const { dataInicio, dataFim, filtroCategoria, filtroTipo } = filtros;
   const { setDataInicio, setDataFim, setFiltroCategoria, setFiltroTipo } = setters;
@@ -63,7 +69,15 @@ const Movimentacoes = ({
   const [busca, setBusca] = useState('');
   const [presetAtivo, setPresetAtivo] = useState(null);
   const [transacaoEditando, setTransacaoEditando] = useState(null);
+  const [pagamentoEditando, setPagamentoEditando] = useState(null);
   const [recorrenciaEditando, setRecorrenciaEditando] = useState(null);
+
+  // Pagamento de fatura não passa pelo fluxo genérico (não pode virar receita nem
+  // trocar de categoria) — abre o diálogo próprio, com as regras do cartão.
+  const editar = (t) => (ehPagamentoDeFatura(t) ? setPagamentoEditando(t) : setTransacaoEditando(t));
+  const contextoPagamentoEditando =
+    pagamentoEditando &&
+    contextoPagamento({ cartaoId: pagamentoEditando.cartaoId, competencia: pagamentoEditando.competencia, ignorarPagamentoId: pagamentoEditando.id });
 
   const modoRecorrentes = filtroTipo === 'recorrentes';
 
@@ -253,7 +267,7 @@ const Movimentacoes = ({
                     dataFormatada={formatarHora(t.data)}
                     valor={t.valor}
                     tipo={t.tipo}
-                    onEditar={() => setTransacaoEditando(t)}
+                    onEditar={() => editar(t)}
                     onExcluir={() => excluirTransacao(t.id)}
                   />
                 ))}
@@ -271,6 +285,23 @@ const Movimentacoes = ({
             onTransacaoSalva={handleTransacaoSalva}
             aoExcluir={excluirTransacao}
             cartoes={cartoes}
+          />
+        )}
+      </ResponsiveDialog>
+
+      <ResponsiveDialog aberto={!!pagamentoEditando} aoFechar={() => setPagamentoEditando(null)}>
+        {pagamentoEditando && contextoPagamentoEditando && (
+          <InvoicePaymentDialog
+            cartao={contextoPagamentoEditando.cartao}
+            competencia={pagamentoEditando.competencia}
+            restanteFaturaCentavos={contextoPagamentoEditando.restanteFaturaCentavos}
+            maximoCentavos={contextoPagamentoEditando.maximoCentavos}
+            saldoFinanceiro={saldoFinanceiro}
+            saldoDisponivel={saldoDisponivel}
+            pagamentoParaEditar={pagamentoEditando}
+            onSalvo={handlePagamentoSalvo}
+            onExcluir={excluirTransacao}
+            onFechar={() => setPagamentoEditando(null)}
           />
         )}
       </ResponsiveDialog>

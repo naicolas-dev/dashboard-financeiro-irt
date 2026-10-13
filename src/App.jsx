@@ -53,6 +53,10 @@ function App() {
       handleRecorrenciaSalva={dados.handleRecorrenciaSalva}
       excluirRecorrencia={dados.excluirRecorrencia}
       cartoes={dados.cartoes}
+      saldoFinanceiro={dados.saldoFinanceiro}
+      saldoDisponivel={dados.saldoDisponivel}
+      handlePagamentoSalvo={dados.handlePagamentoSalvo}
+      contextoPagamento={dados.contextoPagamento}
     />
   );
 
@@ -60,15 +64,21 @@ function App() {
     <Cartoes
       cartoes={dados.cartoes}
       comprasCartao={dados.comprasCartao}
-      parcelasCartao={dados.parcelasCartao}
+      pagamentosFatura={dados.pagamentosFatura}
+      saldoFinanceiro={dados.saldoFinanceiro}
+      saldoDisponivel={dados.saldoDisponivel}
       carregando={dados.carregando}
       erroCarregamento={dados.erroCarregamento}
       handleCartaoSalvo={dados.handleCartaoSalvo}
       handleCompraCriada={dados.handleCompraCriada}
+      handlePagamentoSalvo={dados.handlePagamentoSalvo}
       excluirCartao={dados.excluirCartao}
       excluirCompra={dados.excluirCompra}
       excluirVariasCompras={dados.excluirVariasCompras}
+      excluirTransacao={dados.excluirTransacao}
       handleCompraAtualizada={dados.handleCompraAtualizada}
+      regrasCompra={dados.regrasCompra}
+      contextoPagamento={dados.contextoPagamento}
     />
   );
 

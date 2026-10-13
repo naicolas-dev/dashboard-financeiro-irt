@@ -1,11 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { PlusIcon } from '@heroicons/react/24/outline';
 import CreditCardTile from '../componentes/CreditCardTile.jsx';
 import PaymentCardForm from '../componentes/PaymentCardForm.jsx';
 import ResponsiveDialog from '../componentes/ui/ResponsiveDialog.jsx';
 import Skeleton from '../componentes/ui/Skeleton.jsx';
 import CartaoDetalhe from './CartaoDetalhe.jsx';
-import { competenciaAtual } from '../servicos/cartoes.js';
 
 function CartoesSkeleton() {
   return (
@@ -32,36 +31,30 @@ function AdicionarCartaoTile({ onClick }) {
   );
 }
 
-// Lista de cartões (CreditCardTile já existente, Design Lab) + navegação pro
-// detalhe/extrato. `faturaAtual` vem de `parcelasCartao` (não de `transacoes`) —
-// é a leitura completa, sem o recorte de 12 meses do fluxo de caixa, então não perde
-// parcela nenhuma do mês mesmo que a data dela ainda não tenha "acontecido".
+// Lista de cartões + navegação pro detalhe. Fatura atual, dívida e limite vêm de
+// `cartao.resumo` (derivado pelo domínio a partir de compras + pagamentos).
 const Cartoes = ({
   cartoes,
   comprasCartao,
-  parcelasCartao,
+  pagamentosFatura,
+  saldoFinanceiro,
+  saldoDisponivel,
   carregando,
   erroCarregamento,
   handleCartaoSalvo,
   handleCompraCriada,
+  handlePagamentoSalvo,
   excluirCartao,
   excluirCompra,
   excluirVariasCompras,
+  excluirTransacao,
   handleCompraAtualizada,
+  regrasCompra,
+  contextoPagamento,
 }) => {
   const [cartaoSelecionadoId, setCartaoSelecionadoId] = useState(null);
   const [novoCartaoAberto, setNovoCartaoAberto] = useState(false);
   const [cartaoEditando, setCartaoEditando] = useState(null);
-
-  const faturaAtualPorCartao = useMemo(() => {
-    const atual = competenciaAtual();
-    const mapa = {};
-    for (const parcela of parcelasCartao) {
-      if (parcela.competencia !== atual) continue;
-      mapa[parcela.cartaoId] = (mapa[parcela.cartaoId] || 0) + parcela.valor;
-    }
-    return mapa;
-  }, [parcelasCartao]);
 
   if (cartaoSelecionadoId) {
     return (
@@ -69,14 +62,20 @@ const Cartoes = ({
         cartaoId={cartaoSelecionadoId}
         cartoes={cartoes}
         comprasCartao={comprasCartao}
-        parcelasCartao={parcelasCartao}
+        pagamentosFatura={pagamentosFatura}
+        saldoFinanceiro={saldoFinanceiro}
+        saldoDisponivel={saldoDisponivel}
         onVoltar={() => setCartaoSelecionadoId(null)}
         handleCartaoSalvo={handleCartaoSalvo}
         handleCompraCriada={handleCompraCriada}
+        handlePagamentoSalvo={handlePagamentoSalvo}
         excluirCartao={excluirCartao}
         excluirCompra={excluirCompra}
         excluirVariasCompras={excluirVariasCompras}
+        excluirTransacao={excluirTransacao}
         handleCompraAtualizada={handleCompraAtualizada}
+        regrasCompra={regrasCompra}
+        contextoPagamento={contextoPagamento}
       />
     );
   }
@@ -103,7 +102,7 @@ const Cartoes = ({
               key={cartao.id}
               banco={cartao.nome}
               bandeira={cartao.bandeira}
-              faturaAtual={faturaAtualPorCartao[cartao.id] || 0}
+              faturaAtual={cartao.resumo.faturaAtualCentavos / 100}
               limiteDisponivel={cartao.limiteDisponivel}
               limiteTotal={cartao.limiteTotal}
               fechamento={cartao.diaFechamento}
@@ -130,7 +129,7 @@ const Cartoes = ({
         {cartaoEditando && (
           <PaymentCardForm
             cartaoParaEditar={cartaoEditando}
-            comprometido={cartaoEditando.limiteTotal - cartaoEditando.limiteDisponivel}
+            comprometido={cartaoEditando.divida}
             onVoltar={() => setCartaoEditando(null)}
             onCartaoSalvo={handleCartaoSalvo}
             onEditado={() => setCartaoEditando(null)}

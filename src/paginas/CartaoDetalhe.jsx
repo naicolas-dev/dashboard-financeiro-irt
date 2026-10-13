@@ -3,19 +3,36 @@ import { SegmentGroup } from '@chakra-ui/react';
 import { InboxIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/outline';
 import EmptyState from '../componentes/ui/EmptyState.jsx';
 import IconButton from '../componentes/ui/IconButton.jsx';
+import Button from '../componentes/ui/Button.jsx';
 import ResponsiveDialog from '../componentes/ui/ResponsiveDialog.jsx';
 import Badge from '../componentes/ui/Badge.jsx';
 import PaymentCardForm from '../componentes/PaymentCardForm.jsx';
 import PurchaseDetails from '../componentes/PurchaseDetails.jsx';
 import CardPurchasesTab from '../componentes/CardPurchasesTab.jsx';
 import TransactionFlow from '../componentes/TransactionFlow.jsx';
-import { competenciaAtual, adicionarMesesCompetencia, nomeCompetencia } from '../servicos/cartoes.js';
+import InvoicePaymentDialog from '../componentes/InvoicePaymentDialog.jsx';
+import { adicionarMesesCompetencia, nomeFatura } from '../servicos/cartoes.js';
+import { gastosNoCartaoNoMes } from '../dominio/cartoes.js';
 
 const formatadorMoeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const brl = (centavos) => formatadorMoeda.format(centavos / 100);
+const diaMes = (data) => data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 
-// Ícones operam sobre a COMPRA-PAI (via compraCartaoId), não sobre a parcela isolada
-// — editar/excluir aqui editam/excluem a compra inteira, repetido em cada parcela
-// exibida por conveniência (o usuário pode estar olhando qualquer competência).
+const ROTULO_CICLO = { aberta: 'Aberta', fechada: 'Fechada', vencida: 'Vencida' };
+
+// Status em duas dimensões (ciclo × pagamento) — "vencida e parcialmente paga" existe.
+function BadgesFatura({ fatura }) {
+  if (!fatura) return null;
+  if (fatura.statusPagamento === 'paga') return <Badge variant="positive">Paga</Badge>;
+  return (
+    <span className="flex items-center gap-1">
+      <Badge variant={fatura.statusCiclo === 'vencida' ? 'warning' : 'neutro'}>{ROTULO_CICLO[fatura.statusCiclo]}</Badge>
+      {fatura.statusPagamento === 'parcial' && <Badge variant="warning">Parcialmente paga</Badge>}
+    </span>
+  );
+}
+
+// Ícones operam sobre a COMPRA (via compraCartaoId), não sobre a parcela isolada.
 const ParcelaRow = ({ parcela, onEditarCompra, onExcluirCompra }) => {
   const ehParcelada = parcela.totalParcelas > 1;
   return (
@@ -25,11 +42,9 @@ const ParcelaRow = ({ parcela, onEditarCompra, onExcluirCompra }) => {
         <p className="text-xs text-foreground-muted">
           {parcela.categoria} · {ehParcelada ? `Parcela ${parcela.parcelaAtual}/${parcela.totalParcelas}` : 'À vista'}
         </p>
-        {ehParcelada && (
-          <p className="text-xs text-foreground-muted">Total da compra: {formatadorMoeda.format(parcela.valorTotalCompra)}</p>
-        )}
+        {ehParcelada && <p className="text-xs text-foreground-muted">Total da compra: {brl(parcela.valorTotalCompraCentavos)}</p>}
       </div>
-      <p className="font-semibold tabular-nums text-foreground shrink-0">{formatadorMoeda.format(parcela.valor)}</p>
+      <p className="font-semibold tabular-nums text-foreground shrink-0">{brl(parcela.centavos)}</p>
       <div className="flex items-center gap-0.5 shrink-0">
         <IconButton aria-label={`Editar compra de ${parcela.descricao}`} onClick={onEditarCompra}>
           <PencilSquareIcon className="h-5 w-5" />
@@ -42,80 +57,82 @@ const ParcelaRow = ({ parcela, onEditarCompra, onExcluirCompra }) => {
   );
 };
 
-// Extrato por competência de um cartão (janela visual -8/atual/+3, domínio completo —
-// ver comentário original em `parcelasCartao`) + aba "Compras" (administração: editar/
-// excluir compra-pai, seleção múltipla). `comprasCartao`/`parcelasCartao` já vêm
-// carregados por inteiro do hook, sem query adicional nesta tela.
+const Indicador = ({ rotulo, valor, detalhe }) => (
+  <div className="rounded-xl bg-surface p-3">
+    <p className="text-xs text-foreground-muted">{rotulo}</p>
+    <p className="text-sm font-semibold text-foreground tabular-nums">{valor}</p>
+    {detalhe && <p className="text-xs text-foreground-muted tabular-nums">{detalhe}</p>}
+  </div>
+);
+
+// Detalhe do cartão: dívida/fatura/limite derivados pelo domínio (cartao.resumo),
+// faturas por competência com status em duas dimensões e pagamento de fatura — a
+// única saída de caixa do cartão. Compras e pagamentos já vêm carregados do hook.
 const CartaoDetalhe = ({
   cartaoId,
   cartoes,
   comprasCartao,
-  parcelasCartao,
+  pagamentosFatura,
+  saldoFinanceiro,
+  saldoDisponivel,
   onVoltar,
   handleCartaoSalvo,
   handleCompraCriada,
+  handlePagamentoSalvo,
   excluirCartao,
   excluirCompra,
   excluirVariasCompras,
+  excluirTransacao,
   handleCompraAtualizada,
+  regrasCompra,
+  contextoPagamento,
 }) => {
   const cartao = cartoes.find((c) => c.id === cartaoId);
-  const atual = competenciaAtual();
+  const resumo = cartao?.resumo;
+  const aberta = resumo?.competenciaAberta;
   const pillAtivaRef = useRef(null);
 
-  const competencias = useMemo(() => Array.from({ length: 12 }, (_, i) => adicionarMesesCompetencia(atual, i - 8)), [atual]);
-  const [competenciaSelecionada, setCompetenciaSelecionada] = useState(atual);
+  const competencias = useMemo(() => (aberta ? Array.from({ length: 12 }, (_, i) => adicionarMesesCompetencia(aberta, i - 8)) : []), [aberta]);
+  const [competenciaSelecionada, setCompetenciaSelecionada] = useState(aberta);
   const [aba, setAba] = useState('extrato'); // 'extrato' | 'compras'
   const [cartaoEditandoAberto, setCartaoEditandoAberto] = useState(false);
   const [compraEditando, setCompraEditando] = useState(null);
   const [novaCompraAberta, setNovaCompraAberta] = useState(false);
+  // { competencia, pagamento? } — pagamento presente = edição
+  const [pagamentoDialogo, setPagamentoDialogo] = useState(null);
 
   useEffect(() => {
     pillAtivaRef.current?.scrollIntoView({ inline: 'center', block: 'nearest' });
   }, []);
 
-  const parcelasDoCartao = useMemo(() => parcelasCartao.filter((p) => p.cartaoId === cartaoId), [parcelasCartao, cartaoId]);
   const comprasDoCartao = useMemo(() => comprasCartao.filter((c) => c.cartaoId === cartaoId), [comprasCartao, cartaoId]);
+  const gastosDoMes = useMemo(() => gastosNoCartaoNoMes({ compras: comprasCartao, cartaoId, hoje: new Date() }), [comprasCartao, cartaoId]);
 
-  const faturaAtual = useMemo(
-    () => parcelasDoCartao.filter((p) => p.competencia === atual).reduce((acc, p) => acc + p.valor, 0),
-    [parcelasDoCartao, atual]
-  );
+  if (!cartao) return null;
 
-  const parcelasDaCompetencia = useMemo(
-    () => parcelasDoCartao.filter((p) => p.competencia === competenciaSelecionada),
-    [parcelasDoCartao, competenciaSelecionada]
-  );
-
-  const totalCompetencia = parcelasDaCompetencia.reduce((acc, p) => acc + p.valor, 0);
-  const ehFutura = competenciaSelecionada > atual;
-  const ehAtual = competenciaSelecionada === atual;
-
-  const parcelasDaCompraEditando = useMemo(
-    () => (compraEditando ? parcelasCartao.filter((p) => p.compraCartaoId === compraEditando.id) : []),
-    [parcelasCartao, compraEditando]
-  );
+  const faturaPorCompetencia = Object.fromEntries(resumo.faturas.map((f) => [f.competencia, f]));
+  const faturaSelecionada = faturaPorCompetencia[competenciaSelecionada] ?? null;
+  const pagamentosDaCompetencia = pagamentosFatura
+    .filter((p) => p.cartaoId === cartaoId && p.competencia === competenciaSelecionada)
+    .sort((a, b) => (a.data < b.data ? 1 : -1));
 
   const abrirEditarCompraPorId = (compraId) => {
     const compra = comprasCartao.find((c) => c.id === compraId);
     if (compra) setCompraEditando(compra);
   };
-
   const excluirCompraPorId = (compraId) => {
     const compra = comprasCartao.find((c) => c.id === compraId);
     if (compra) excluirCompra(compra);
   };
 
-  if (!cartao) return null;
+  const dialogo =
+    pagamentoDialogo &&
+    contextoPagamento({ cartaoId, competencia: pagamentoDialogo.competencia, ignorarPagamentoId: pagamentoDialogo.pagamento?.id });
 
   return (
     <div className="max-w-xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onVoltar}
-          className="focus-ring cursor-pointer text-sm text-foreground-secondary px-2 py-1.5 -ml-2 rounded-lg"
-        >
+        <button type="button" onClick={onVoltar} className="focus-ring cursor-pointer text-sm text-foreground-secondary px-2 py-1.5 -ml-2 rounded-lg">
           ← Voltar
         </button>
       </div>
@@ -129,21 +146,47 @@ const CartaoDetalhe = ({
         </div>
 
         <div>
-          <p className="text-sm text-foreground-secondary">Fatura atual</p>
-          <p className="text-3xl font-semibold tracking-tight text-foreground tabular-nums">{formatadorMoeda.format(faturaAtual)}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-foreground-secondary">Fatura atual</p>
+            <BadgesFatura fatura={resumo.faturaAtual} />
+          </div>
+          <p className="text-3xl font-semibold tracking-tight text-foreground tabular-nums">{brl(resumo.faturaAtualCentavos)}</p>
+          {resumo.faturaAtual && (
+            <p className="text-xs text-foreground-muted">
+              Fecha {diaMes(resumo.faturaAtual.fechamento)} · vence {diaMes(resumo.faturaAtual.vencimento)}
+            </p>
+          )}
         </div>
 
-        <div>
-          <p className="text-sm text-foreground-secondary tabular-nums">
-            Limite disponível {formatadorMoeda.format(cartao.limiteDisponivel)} de {formatadorMoeda.format(cartao.limiteTotal)}
-          </p>
+        <div className="grid grid-cols-2 gap-2">
+          <Indicador rotulo="Dívida total" valor={brl(resumo.dividaCentavos)} />
+          <Indicador rotulo="Próximas parcelas" valor={brl(resumo.proximasParcelasCentavos)} />
+          <Indicador rotulo="Limite disponível" valor={brl(resumo.limiteDisponivelCentavos)} detalhe={`de ${formatadorMoeda.format(cartao.limiteTotal)}`} />
+          <Indicador rotulo="Gastos no cartão este mês" valor={brl(gastosDoMes)} />
         </div>
+
+        {resumo.faturasAPagar.map((f) => (
+          <div key={f.competencia} className="rounded-xl border border-border p-3 flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium text-foreground">Fatura de {nomeFatura(f.competencia, cartao)}</p>
+                <BadgesFatura fatura={f} />
+              </div>
+              <p className="text-xs text-foreground-muted tabular-nums">
+                Falta {brl(f.restanteCentavos)} · vence {diaMes(f.vencimento)}
+              </p>
+            </div>
+            <Button size="sm" onClick={() => setPagamentoDialogo({ competencia: f.competencia })}>
+              Pagar
+            </Button>
+          </div>
+        ))}
       </div>
 
       <SegmentGroup.Root value={aba} onValueChange={(details) => setAba(details.value)} className="p-1 rounded-full bg-surface-hover">
         <SegmentGroup.Indicator className="rounded-full bg-surface-raised dark:bg-surface-active shadow-sm" />
         {[
-          { valor: 'extrato', texto: 'Extrato' },
+          { valor: 'extrato', texto: 'Faturas' },
           { valor: 'compras', texto: 'Compras' },
         ].map((item) => (
           <SegmentGroup.Item key={item.valor} value={item.valor}>
@@ -173,7 +216,7 @@ const CartaoDetalhe = ({
             {competencias.map((c) => (
               <button
                 key={c}
-                ref={c === atual ? pillAtivaRef : undefined}
+                ref={c === aberta ? pillAtivaRef : undefined}
                 type="button"
                 onClick={() => setCompetenciaSelecionada(c)}
                 className={`focus-ring cursor-pointer shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
@@ -182,39 +225,82 @@ const CartaoDetalhe = ({
                     : 'bg-surface-raised text-foreground-secondary border-border hover:bg-surface-hover'
                 }`}
               >
-                {nomeCompetencia(c).slice(0, 3)}
+                {nomeFatura(c, cartao).slice(0, 3)}
               </button>
             ))}
           </div>
 
           <section className="space-y-2">
-            <div className="flex items-center justify-between px-1">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-                {nomeCompetencia(competenciaSelecionada)}
-              </h2>
-              {ehFutura && <Badge variant="neutro">Fatura projetada</Badge>}
-              {ehAtual && <Badge variant="neutro">Fatura atual</Badge>}
+            <div className="flex items-center justify-between gap-2 px-1">
+              <div>
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+                  Fatura de {nomeFatura(competenciaSelecionada, cartao)}
+                </h2>
+                {faturaSelecionada && (
+                  <p className="text-xs text-foreground-muted">
+                    Fecha {diaMes(faturaSelecionada.fechamento)} · vence {diaMes(faturaSelecionada.vencimento)}
+                  </p>
+                )}
+              </div>
+              <BadgesFatura fatura={faturaSelecionada} />
             </div>
 
-            {parcelasDaCompetencia.length === 0 ? (
-              <EmptyState icone={InboxIcon} titulo="Nada nessa competência" descricao="Nenhuma parcela de cartão cai neste mês." />
+            {!faturaSelecionada ? (
+              <EmptyState icone={InboxIcon} titulo="Nada nesta fatura" descricao="Nenhuma parcela de cartão cai nesta fatura." />
             ) : (
-              <div className="rounded-2xl border border-border bg-surface-raised p-2 divide-y divide-border">
-                {parcelasDaCompetencia.map((p) => (
-                  <ParcelaRow
-                    key={p.id}
-                    parcela={p}
-                    onEditarCompra={() => abrirEditarCompraPorId(p.compraCartaoId)}
-                    onExcluirCompra={() => excluirCompraPorId(p.compraCartaoId)}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="rounded-2xl border border-border bg-surface-raised p-2 divide-y divide-border">
+                  {faturaSelecionada.parcelas.map((p) => (
+                    <ParcelaRow
+                      key={p.id}
+                      parcela={p}
+                      onEditarCompra={() => abrirEditarCompraPorId(p.compraCartaoId)}
+                      onExcluirCompra={() => excluirCompraPorId(p.compraCartaoId)}
+                    />
+                  ))}
+                </div>
+
+                <div className="px-1 pt-1 space-y-1 text-sm tabular-nums">
+                  <div className="flex justify-between">
+                    <span className="text-foreground-secondary">Total da fatura</span>
+                    <span className="font-semibold text-foreground">{brl(faturaSelecionada.totalCentavos)}</span>
+                  </div>
+                  {faturaSelecionada.pagoCentavos > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-foreground-secondary">Pago</span>
+                      <span className="text-foreground">{brl(faturaSelecionada.pagoCentavos)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-foreground-secondary">Restante</span>
+                    <span className="font-semibold text-foreground">{brl(faturaSelecionada.restanteCentavos)}</span>
+                  </div>
+                </div>
+
+                {faturaSelecionada.restanteCentavos > 0 && (
+                  <Button className="w-full" onClick={() => setPagamentoDialogo({ competencia: competenciaSelecionada })}>
+                    Pagar fatura
+                  </Button>
+                )}
+              </>
             )}
 
-            {parcelasDaCompetencia.length > 0 && (
-              <div className="flex items-center justify-between px-1 pt-1">
-                <p className="text-sm font-medium text-foreground-secondary">{ehFutura ? 'Total projetado' : 'Total da fatura'}</p>
-                <p className="text-sm font-semibold text-foreground tabular-nums">{formatadorMoeda.format(totalCompetencia)}</p>
+            {pagamentosDaCompetencia.length > 0 && (
+              <div className="space-y-2 pt-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground-muted px-1">Pagamentos registrados</h3>
+                <div className="rounded-2xl border border-border bg-surface-raised p-2 divide-y divide-border">
+                  {pagamentosDaCompetencia.map((p) => (
+                    <div key={p.id} className="flex items-center gap-3 py-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-foreground">{new Date(p.data).toLocaleDateString('pt-BR')}</p>
+                      </div>
+                      <p className="text-sm font-semibold tabular-nums text-foreground">{formatadorMoeda.format(p.valor)}</p>
+                      <IconButton aria-label="Editar pagamento" onClick={() => setPagamentoDialogo({ competencia: p.competencia, pagamento: p })}>
+                        <PencilSquareIcon className="h-5 w-5" />
+                      </IconButton>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </section>
@@ -224,7 +310,7 @@ const CartaoDetalhe = ({
       <ResponsiveDialog aberto={cartaoEditandoAberto} aoFechar={() => setCartaoEditandoAberto(false)}>
         <PaymentCardForm
           cartaoParaEditar={cartao}
-          comprometido={cartao.limiteTotal - cartao.limiteDisponivel}
+          comprometido={cartao.divida}
           onVoltar={() => setCartaoEditandoAberto(false)}
           onCartaoSalvo={handleCartaoSalvo}
           onEditado={() => setCartaoEditandoAberto(false)}
@@ -241,7 +327,7 @@ const CartaoDetalhe = ({
           <PurchaseDetails
             compra={compraEditando}
             cartao={cartao}
-            parcelasExistentes={parcelasDaCompraEditando}
+            regras={regrasCompra(compraEditando)}
             onVoltar={() => setCompraEditando(null)}
             onCompraAtualizada={handleCompraAtualizada}
             onExcluido={() => setCompraEditando(null)}
@@ -259,6 +345,23 @@ const CartaoDetalhe = ({
             onFechar={() => setNovaCompraAberta(false)}
             onTransacaoSalva={() => {}}
             onCompraCartaoSalva={handleCompraCriada}
+          />
+        )}
+      </ResponsiveDialog>
+
+      <ResponsiveDialog aberto={!!dialogo} aoFechar={() => setPagamentoDialogo(null)}>
+        {dialogo && (
+          <InvoicePaymentDialog
+            cartao={cartao}
+            competencia={pagamentoDialogo.competencia}
+            restanteFaturaCentavos={dialogo.restanteFaturaCentavos}
+            maximoCentavos={dialogo.maximoCentavos}
+            saldoFinanceiro={saldoFinanceiro}
+            saldoDisponivel={saldoDisponivel}
+            pagamentoParaEditar={pagamentoDialogo.pagamento}
+            onSalvo={handlePagamentoSalvo}
+            onExcluir={excluirTransacao}
+            onFechar={() => setPagamentoDialogo(null)}
           />
         )}
       </ResponsiveDialog>

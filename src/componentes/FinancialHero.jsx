@@ -72,7 +72,7 @@ const FinancialHero = ({
         <div className="flex items-center gap-2">
           <ArrowUpIcon className="h-4 w-4 text-positive shrink-0" />
           <div>
-            <p className="text-xs text-foreground-muted">Receitas</p>
+            <p className="text-xs text-foreground-muted">Entradas</p>
             <p className="text-sm font-semibold text-foreground tabular-nums">
               {dadosIndisponiveis ? '—' : formatadorEstatico.format(receitas)}
             </p>
@@ -81,7 +81,7 @@ const FinancialHero = ({
         <div className="flex items-center gap-2">
           <ArrowDownIcon className="h-4 w-4 text-negative shrink-0" />
           <div>
-            <p className="text-xs text-foreground-muted">Despesas</p>
+            <p className="text-xs text-foreground-muted">Saídas</p>
             <p className="text-sm font-semibold text-foreground tabular-nums">
               {dadosIndisponiveis ? '—' : formatadorEstatico.format(despesas)}
             </p>

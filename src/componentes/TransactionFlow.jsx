@@ -41,14 +41,6 @@ const TransactionFlow = ({
   cartaoForcado,
 }) => {
   const modoEdicao = !!transacaoParaEditar;
-  const infoParcelaCartao =
-    modoEdicao && transacaoParaEditar.origem === 'cartao'
-      ? {
-          parcelaAtual: transacaoParaEditar.parcelaAtual,
-          totalParcelas: transacaoParaEditar.totalParcelas,
-          cartaoNome: cartoes?.find((c) => c.id === transacaoParaEditar.cartaoId)?.nome ?? 'cartão',
-        }
-      : null;
 
   const [estado, setEstado] = useState(() => ({
     ...estadoInicial(tipoInicial, transacaoParaEditar),
@@ -105,7 +97,7 @@ const TransactionFlow = ({
     try {
       if (ehCompraNoCartao) {
         const cartao = cartoes.find((c) => c.id === estado.cartaoId);
-        const { compra, parcelas } = await criarCompraCartao({
+        const compra = await criarCompraCartao({
           cartao,
           descricao: estado.descricao,
           categoria: estado.categoria,
@@ -113,7 +105,7 @@ const TransactionFlow = ({
           numeroParcelas: estado.numeroParcelas,
           dataCompraISO: estado.data,
         });
-        onCompraCartaoSalva(compra, parcelas);
+        onCompraCartaoSalva(compra);
         onFechar();
         toast.success(`Compra parcelada em ${estado.numeroParcelas === 1 ? 'à vista' : `${estado.numeroParcelas}x`}!`);
       } else {
@@ -234,7 +226,6 @@ const TransactionFlow = ({
       modoEdicao={modoEdicao}
       excluindo={estado.excluindo}
       onExcluir={aoExcluir ? excluir : undefined}
-      infoParcelaCartao={infoParcelaCartao}
       cartoes={cartoes}
       formaPagamento={estado.formaPagamento}
       setFormaPagamento={(v) => atualizar({ formaPagamento: v })}

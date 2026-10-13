@@ -117,7 +117,7 @@ const PaymentCardForm = ({
 
       {limiteInsuficiente && (
         <p className="text-sm text-negative">
-          O limite não pode ser menor que {formatadorMoeda.format(comprometido)} enquanto houver compras vinculadas.
+          O limite não pode ser menor que a dívida atual do cartão ({formatadorMoeda.format(comprometido)}).
         </p>
       )}
 
@@ -139,6 +139,12 @@ const PaymentCardForm = ({
           onChange={(e) => setDiaVencimento(e.target.value)}
         />
       </div>
+
+      {diaValido(diaFechamento) && diaValido(diaVencimento) && Number(diaVencimento) <= Number(diaFechamento) && (
+        <p className="text-xs text-foreground-muted">
+          A fatura fecha no dia {diaFechamento} e vence no dia {diaVencimento} do mês seguinte.
+        </p>
+      )}
 
       <Button size="lg" className="w-full" disabled={!podeSalvar} carregando={salvando} onClick={salvar}>
         {modoEdicao ? 'Salvar alterações' : 'Salvar cartão'}
