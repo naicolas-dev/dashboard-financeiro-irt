@@ -52,6 +52,13 @@ const Cartoes = ({
   regrasCompra,
   validarAlteracaoCompras,
   contextoPagamento,
+  assinaturasCartao,
+  assinaturasIndisponiveis,
+  criarAssinaturaCartao,
+  editarAssinaturaCartao,
+  cancelarAssinaturaCartao,
+  excluirAssinaturaCartao,
+  podeExcluirAssinaturaCartao,
 }) => {
   const [cartaoSelecionadoId, setCartaoSelecionadoId] = useState(null);
   const [novoCartaoAberto, setNovoCartaoAberto] = useState(false);
@@ -78,6 +85,13 @@ const Cartoes = ({
         regrasCompra={regrasCompra}
         validarAlteracaoCompras={validarAlteracaoCompras}
         contextoPagamento={contextoPagamento}
+        assinaturasCartao={assinaturasCartao}
+        assinaturasIndisponiveis={assinaturasIndisponiveis}
+        criarAssinaturaCartao={criarAssinaturaCartao}
+        editarAssinaturaCartao={editarAssinaturaCartao}
+        cancelarAssinaturaCartao={cancelarAssinaturaCartao}
+        excluirAssinaturaCartao={excluirAssinaturaCartao}
+        podeExcluirAssinaturaCartao={podeExcluirAssinaturaCartao}
       />
     );
   }

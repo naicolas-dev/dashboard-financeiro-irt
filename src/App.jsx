@@ -89,6 +89,13 @@ function App() {
       regrasCompra={dados.regrasCompra}
       validarAlteracaoCompras={dados.validarAlteracaoCompras}
       contextoPagamento={dados.contextoPagamento}
+      assinaturasCartao={dados.assinaturasCartao}
+      assinaturasIndisponiveis={dados.assinaturasIndisponiveis}
+      criarAssinaturaCartao={dados.criarAssinaturaCartao}
+      editarAssinaturaCartao={dados.editarAssinaturaCartao}
+      cancelarAssinaturaCartao={dados.cancelarAssinaturaCartao}
+      excluirAssinaturaCartao={dados.excluirAssinaturaCartao}
+      podeExcluirAssinaturaCartao={dados.podeExcluirAssinaturaCartao}
     />
   );
 

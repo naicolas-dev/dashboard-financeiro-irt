@@ -11,7 +11,7 @@ const formatadorMoeda = new Intl.NumberFormat('pt-BR', { style: 'currency', curr
 // verdade: editar/excluir a compra inteira, e o modo de seleção múltipla. "Selecionar
 // todos" pega TODAS as compras do cartão, não só as da competência aberta no Extrato —
 // é o caso de uso de limpar dados de teste de um cartão inteiro.
-const CardPurchasesTab = ({ comprasDoCartao, onEditarCompra, onAdicionarCompra, excluirCompra, excluirVariasCompras }) => {
+const CardPurchasesTab = ({ comprasDoCartao, onEditarCompra, onAdicionarCompra, onAdicionarAssinatura, excluirCompra, excluirVariasCompras }) => {
   const [modoSelecao, setModoSelecao] = useState(false);
   const [selecionados, setSelecionados] = useState(new Set());
 
@@ -49,8 +49,18 @@ const CardPurchasesTab = ({ comprasDoCartao, onEditarCompra, onAdicionarCompra, 
               className="focus-ring cursor-pointer flex items-center gap-1 text-sm font-medium text-foreground px-2 py-1 rounded-lg hover:bg-surface-hover"
             >
               <PlusIcon className="h-4 w-4" />
-              Adicionar
+              Compra
             </button>
+            {onAdicionarAssinatura && (
+              <button
+                type="button"
+                onClick={onAdicionarAssinatura}
+                className="focus-ring cursor-pointer flex items-center gap-1 text-sm font-medium text-foreground px-2 py-1 rounded-lg hover:bg-surface-hover"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Assinatura
+              </button>
+            )}
             {comprasDoCartao.length > 0 && (
               <button
                 type="button"
@@ -99,6 +109,7 @@ const CardPurchasesTab = ({ comprasDoCartao, onEditarCompra, onAdicionarCompra, 
                 <p className="font-medium text-foreground truncate">{compra.descricao}</p>
                 <p className="text-xs text-foreground-muted">
                   {compra.categoria} · {rotuloParcelas(compra.numeroParcelas)} · {formatadorMoeda.format(compra.valorTotal)}
+                  {compra.origem === 'assinatura' ? ' · Assinatura' : ''}
                 </p>
               </>
             );

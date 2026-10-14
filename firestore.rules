@@ -33,6 +33,12 @@ service cloud.firestore {
       allow read, write: if ehProprietario();
     }
 
+    // Assinaturas em cartão (template da cobrança mensal). Mesmo contrato das demais coleções:
+    // dono único, sem userId/resource.data, leitura da coleção inteira (sem where).
+    match /assinaturasCartao/{id} {
+      allow read, write: if ehProprietario();
+    }
+
     // Qualquer outra coleção fica bloqueada por padrão.
     match /{document=**} {
       allow read, write: if false;

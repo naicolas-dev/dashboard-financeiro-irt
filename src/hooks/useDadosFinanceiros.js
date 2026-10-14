@@ -2,7 +2,9 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { collection, getDocs, doc, deleteDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { db } from '../firebase/configuracao';
-import { buscarPagamentosDeFatura, excluirCompraCartao, excluirComprasCartaoEmLote } from '../servicos/cartoes.js';
+import { buscarPagamentosDeFatura, excluirComprasCartaoEmLote } from '../servicos/cartoes.js';
+import * as servicoAssinaturas from '../servicos/assinaturasCartao.js';
+import { normalizarAssinatura as normalizarAssinaturaCartao, ehCobrancaDeAssinatura } from '../dominio/assinaturasCartao.js';
 import {
   movimentacoesDeCaixa,
   parcelasDaCompra,
@@ -53,7 +55,19 @@ const MOTIVOS_DE_RECUSA = {
   nao_realizada: 'Esta conta ainda não foi quitada.',
   sem_transacao: 'O registro do pagamento não foi encontrado. Use "Desfazer" para reconciliar.',
   tem_realizadas: 'Esta recorrência já tem pagamentos registrados. Encerre-a em vez de excluir.',
+  ja_cancelada: 'Esta assinatura já está cancelada.',
+  tem_cobrancas: 'Esta assinatura já gerou cobranças. Cancele-a em vez de excluir.',
 };
+
+// Cobranças de assinatura removidas pelo usuário viram "competência ignorada" na assinatura (senão a
+// geração as recriaria a cada abertura); compras comuns seguem o caminho de sempre.
+async function apagarCompras(compras) {
+  const deAssinatura = compras.filter(ehCobrancaDeAssinatura);
+  const comuns = compras.filter((c) => !ehCobrancaDeAssinatura(c));
+  if (deAssinatura.length > 0) await servicoAssinaturas.excluirCobrancas(deAssinatura);
+  if (comuns.length > 0) await excluirComprasCartaoEmLote(comuns.map((c) => c.id));
+  return deAssinatura;
+}
 
 // Toda ordenação de transações é por TEMPO REAL (dominio/tempo.js), nunca por string:
 // os documentos misturam 'YYYY-MM-DDTHH:mm' (hora local) e ISO com Z (UTC).
@@ -102,6 +116,10 @@ export function useDadosFinanceiros(usuario) {
   const [ocorrenciasIndisponiveis, setOcorrenciasIndisponiveis] = useState(false);
   const [cartoesBase, setCartoesBase] = useState([]);
   const [comprasCartao, setComprasCartao] = useState([]);
+  // Templates de assinatura em cartão. `assinaturasIndisponiveis` = coleção não pôde ser lida (ex.: Rule
+  // ainda não publicada): cartões e compras funcionam, só não há geração nem gestão de assinaturas.
+  const [assinaturas, setAssinaturas] = useState([]);
+  const [assinaturasIndisponiveis, setAssinaturasIndisponiveis] = useState(false);
   const [pagamentosFatura, setPagamentosFatura] = useState([]);
   const [carregando, setCarregando] = useState(true);
   // true quando o carregamento inicial falhou (tipicamente offline) — distingue
@@ -125,6 +143,8 @@ export function useDadosFinanceiros(usuario) {
       setOcorrenciasIndisponiveis(false);
       setCartoesBase([]);
       setComprasCartao([]);
+      setAssinaturas([]);
+      setAssinaturasIndisponiveis(false);
       setPagamentosFatura([]);
       setCarregando(false);
       return;
@@ -152,7 +172,7 @@ export function useDadosFinanceiros(usuario) {
       }
 
       try {
-        const [todasAsTransacoes, metasCarregadas, recorrenciasCarregadas, cartoesCarregados, comprasCartaoCarregadas, pagamentosCarregados, ocorrenciasLidas] =
+        const [todasAsTransacoes, metasCarregadas, recorrenciasCarregadas, cartoesCarregados, comprasCartaoCarregadas, pagamentosCarregados, ocorrenciasLidas, assinaturasLidas] =
           await Promise.all([
             buscarTodasTransacoes(),
             buscarTodos('metas'),
@@ -164,6 +184,11 @@ export function useDadosFinanceiros(usuario) {
             // derruba o app: `null` = indisponível, e nada é gerado em cima de leitura incerta.
             buscarTodos('ocorrenciasRecorrentes').catch((erro) => {
               console.warn('Não foi possível ler ocorrenciasRecorrentes:', erro?.code ?? erro);
+              return null;
+            }),
+            // Idem para assinaturas em cartão: falha só nesta coleção não derruba o app.
+            buscarTodos('assinaturasCartao').catch((erro) => {
+              console.warn('Não foi possível ler assinaturasCartao:', erro?.code ?? erro);
               return null;
             }),
           ]);
@@ -180,6 +205,23 @@ export function useDadosFinanceiros(usuario) {
           }
         }
 
+        // Cobranças de assinatura devidas (data ≤ hoje) viram compras no cartão: id determinístico, criar se
+        // não existe, só depois de ler tudo com sucesso. Nunca toca o caixa.
+        let comprasFinais = comprasCartaoCarregadas;
+        if (assinaturasLidas !== null) {
+          try {
+            const criadas = await servicoAssinaturas.garantirCobrancas({
+              assinaturas: assinaturasLidas,
+              compras: comprasCartaoCarregadas,
+              cartoes: cartoesCarregados,
+              agora: new Date(),
+            });
+            comprasFinais = [...comprasCartaoCarregadas, ...criadas];
+          } catch (erro) {
+            console.warn('Não foi possível gerar as cobranças de assinatura:', erro);
+          }
+        }
+
         if (!ativo) return;
         setTransacoes(ordenarPorDataDesc(todasAsTransacoes));
         setMetas(metasCarregadas.map(normalizarMeta));
@@ -187,7 +229,9 @@ export function useDadosFinanceiros(usuario) {
         setOcorrencias(ocorrenciasFinais);
         setOcorrenciasIndisponiveis(ocorrenciasLidas === null);
         setCartoesBase(cartoesCarregados);
-        setComprasCartao(comprasCartaoCarregadas);
+        setComprasCartao(comprasFinais);
+        setAssinaturas(assinaturasLidas ?? []);
+        setAssinaturasIndisponiveis(assinaturasLidas === null);
         setPagamentosFatura(pagamentosCarregados);
       } catch (erro) {
         console.error('Erro ao carregar os dados financeiros:', erro);
@@ -782,6 +826,135 @@ export function useDadosFinanceiros(usuario) {
     setComprasCartao((prev) => [...prev, compra]);
   }, []);
 
+  // Assinaturas em cartão -------------------------------------------------------------------
+  const guardarAssinatura = useCallback((assinatura) => {
+    setAssinaturas((prev) => (prev.some((a) => a.id === assinatura.id) ? prev.map((a) => (a.id === assinatura.id ? { ...a, ...assinatura } : a)) : [...prev, assinatura]));
+  }, []);
+
+  const acrescentarCompras = useCallback((novas) => {
+    if (novas.length === 0) return;
+    setComprasCartao((prev) => [...prev, ...novas.filter((n) => !prev.some((c) => c.id === n.id))]);
+  }, []);
+
+  // Cria o template e já gera as cobranças devidas (a primeira vem de "hoje em diante": nada retroativo).
+  const criarAssinaturaCartao = useCallback(
+    async (dados) => {
+      try {
+        const agora = new Date();
+        const assinatura = await servicoAssinaturas.criarAssinatura(dados, agora);
+        guardarAssinatura(assinatura);
+        const cartao = cartoesBase.find((c) => c.id === assinatura.cartaoId);
+        try {
+          acrescentarCompras(await servicoAssinaturas.garantirCobrancas({ assinaturas: [assinatura], compras: [], cartoes: cartao ? [cartao] : [], agora }));
+        } catch (erro) {
+          console.warn('Assinatura criada, mas a cobrança não pôde ser gerada agora:', erro);
+          toast.warning('Assinatura criada. A cobrança aparece na próxima vez que você abrir o app.');
+        }
+        toast.success('Assinatura criada');
+        return true;
+      } catch (erro) {
+        console.error('Erro ao criar assinatura:', erro);
+        toast.error('Não foi possível salvar a assinatura. Tente novamente.');
+        return false;
+      }
+    },
+    [cartoesBase, guardarAssinatura, acrescentarCompras]
+  );
+
+  // Editar afeta só as cobranças ainda não geradas; compras existentes ficam como estão.
+  const editarAssinaturaCartao = useCallback(
+    async (assinatura, campos) => {
+      try {
+        const resultado = await servicoAssinaturas.editarAssinatura({ assinaturaId: assinatura.id, campos });
+        if (!resultado.ok) {
+          toast.error(MOTIVOS_DE_RECUSA[resultado.motivo] ?? 'Não foi possível salvar a assinatura.');
+          return false;
+        }
+        guardarAssinatura(resultado.assinatura);
+        toast.success('Assinatura atualizada. As próximas cobranças usam os novos dados.');
+        return true;
+      } catch (erro) {
+        console.error('Erro ao editar assinatura:', erro);
+        toast.error('Não foi possível salvar a assinatura. Tente novamente.');
+        return false;
+      }
+    },
+    [guardarAssinatura]
+  );
+
+  const cancelarAssinaturaCartao = useCallback(
+    (assinatura) =>
+      confirmarExclusao({
+        titulo: 'Cancelar assinatura?',
+        descricao: 'Novas cobranças deixam de ser geradas. As cobranças já feitas, as faturas e os pagamentos continuam como estão.',
+        textoConfirmar: 'Cancelar assinatura',
+        acao: async () => {
+          try {
+            const cartao = cartoesBase.find((c) => c.id === assinatura.cartaoId);
+            const resultado = await servicoAssinaturas.cancelarAssinatura({ assinaturaId: assinatura.id, cartao, agora: new Date() });
+            if (!resultado.ok) {
+              toast.error(MOTIVOS_DE_RECUSA[resultado.motivo] ?? 'Não foi possível cancelar a assinatura.');
+              return false;
+            }
+            guardarAssinatura(resultado.assinatura);
+            acrescentarCompras(resultado.criadas ?? []);
+            toast.success('Assinatura cancelada');
+            return true;
+          } catch (erro) {
+            console.error('Erro ao cancelar assinatura:', erro);
+            toast.error('Não foi possível cancelar a assinatura. Tente novamente.');
+            return false;
+          }
+        },
+      }),
+    [cartoesBase, confirmarExclusao, guardarAssinatura, acrescentarCompras]
+  );
+
+  const podeExcluirAssinaturaCartao = useCallback((assinatura) => !comprasCartao.some((c) => c.assinaturaId === assinatura.id), [comprasCartao]);
+
+  const excluirAssinaturaCartao = useCallback(
+    (assinatura) => {
+      if (!podeExcluirAssinaturaCartao(assinatura)) {
+        toast.error(MOTIVOS_DE_RECUSA.tem_cobrancas);
+        return false;
+      }
+      return confirmarExclusao({
+        titulo: 'Excluir assinatura?',
+        descricao: 'A configuração será removida. Nenhuma cobrança foi gerada por ela.',
+        acao: async () => {
+          try {
+            const resultado = await servicoAssinaturas.excluirAssinatura({ assinaturaId: assinatura.id });
+            if (!resultado.ok) {
+              toast.error(MOTIVOS_DE_RECUSA[resultado.motivo] ?? 'Não foi possível excluir a assinatura.');
+              return false;
+            }
+            setAssinaturas((prev) => prev.filter((a) => a.id !== assinatura.id));
+            toast.success('Assinatura removida');
+            return true;
+          } catch (erro) {
+            console.error('Erro ao excluir assinatura:', erro);
+            toast.error('Não foi possível excluir a assinatura.');
+            return false;
+          }
+        },
+      });
+    },
+    [podeExcluirAssinaturaCartao, confirmarExclusao]
+  );
+
+  const assinaturasCartao = useMemo(() => assinaturas.map(normalizarAssinaturaCartao), [assinaturas]);
+
+  // Espelha no estado local as competências ignoradas gravadas por `excluirCobrancas`.
+  const registrarCobrancasIgnoradas = useCallback((removidas) => {
+    if (removidas.length === 0) return;
+    setAssinaturas((prev) =>
+      prev.map((a) => {
+        const dela = removidas.filter((c) => c.assinaturaId === a.id).map((c) => c.competenciaCobranca);
+        return dela.length ? { ...a, competenciasIgnoradas: [...new Set([...(a.competenciasIgnoradas ?? []), ...dela])] } : a;
+      })
+    );
+  }, []);
+
   // Sem ida ao Firestore pra checar o bloqueio — `comprasCartao` já está carregado
   // por inteiro, então "tem compra vinculada?" é só um filter local. Bloqueado não
   // pede confirmação (a ação simplesmente não é permitida, diferente de "tem certeza?").
@@ -796,6 +969,10 @@ export function useDadosFinanceiros(usuario) {
       }
       if (pagamentosFatura.some((p) => p.cartaoId === cartao.id)) {
         toast.error('Este cartão possui pagamentos de fatura registrados e não pode ser removido.');
+        return false;
+      }
+      if (assinaturas.some((a) => a.cartaoId === cartao.id)) {
+        toast.error('Este cartão possui assinaturas. Exclua ou cancele as assinaturas antes de remover o cartão.');
         return false;
       }
 
@@ -816,7 +993,7 @@ export function useDadosFinanceiros(usuario) {
         },
       });
     },
-    [comprasCartao, pagamentosFatura, confirmarExclusao]
+    [comprasCartao, pagamentosFatura, assinaturas, confirmarExclusao]
   );
 
   // Permitido mesmo com fatura fechada/paga (pode ter sido lançamento errado), desde
@@ -832,10 +1009,12 @@ export function useDadosFinanceiros(usuario) {
       const regras = regrasCompra(compra);
       return confirmarExclusao({
         titulo: 'Excluir compra?',
-        descricao: regras.aviso ?? 'A compra e as parcelas dela saem da fatura.',
+        descricao: ehCobrancaDeAssinatura(compra)
+          ? 'Esta cobrança de assinatura sai da fatura e não será gerada de novo. Para parar as próximas cobranças, cancele a assinatura.'
+          : (regras.aviso ?? 'A compra e as parcelas dela saem da fatura.'),
         acao: async () => {
           try {
-            await excluirCompraCartao(compra.id);
+            registrarCobrancasIgnoradas(await apagarCompras([compra]));
             setComprasCartao((prev) => prev.filter((c) => c.id !== compra.id));
             toast.success('Compra excluída');
             return true;
@@ -847,7 +1026,7 @@ export function useDadosFinanceiros(usuario) {
         },
       });
     },
-    [regrasCompra, validarAlteracaoCompras, confirmarExclusao]
+    [regrasCompra, validarAlteracaoCompras, confirmarExclusao, registrarCobrancasIgnoradas]
   );
 
   const excluirVariasCompras = useCallback(
@@ -867,7 +1046,7 @@ export function useDadosFinanceiros(usuario) {
         acao: async () => {
           const idsCompras = new Set(compras.map((c) => c.id));
           try {
-            await excluirComprasCartaoEmLote([...idsCompras]);
+            registrarCobrancasIgnoradas(await apagarCompras(compras));
             setComprasCartao((prev) => prev.filter((c) => !idsCompras.has(c.id)));
             toast.success('Compras excluídas');
             return true;
@@ -879,7 +1058,7 @@ export function useDadosFinanceiros(usuario) {
         },
       });
     },
-    [regrasCompra, validarAlteracaoCompras, confirmarExclusao]
+    [regrasCompra, validarAlteracaoCompras, confirmarExclusao, registrarCobrancasIgnoradas]
   );
 
   // Parcelas são derivadas da compra — basta trocar o documento.
@@ -936,6 +1115,13 @@ export function useDadosFinanceiros(usuario) {
     podeExcluirSerieRecorrente,
     handleCartaoSalvo,
     handleCompraCriada,
+    assinaturasCartao,
+    assinaturasIndisponiveis,
+    criarAssinaturaCartao,
+    editarAssinaturaCartao,
+    cancelarAssinaturaCartao,
+    excluirAssinaturaCartao,
+    podeExcluirAssinaturaCartao,
     excluirCartao,
     excluirCompra,
     excluirVariasCompras,

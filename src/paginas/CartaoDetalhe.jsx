@@ -9,6 +9,9 @@ import Badge from '../componentes/ui/Badge.jsx';
 import PaymentCardForm from '../componentes/PaymentCardForm.jsx';
 import PurchaseDetails from '../componentes/PurchaseDetails.jsx';
 import CardPurchasesTab from '../componentes/CardPurchasesTab.jsx';
+import SubscriptionsTab from '../componentes/SubscriptionsTab.jsx';
+import SubscriptionForm from '../componentes/SubscriptionForm.jsx';
+import SubscriptionActions from '../componentes/SubscriptionActions.jsx';
 import TransactionFlow from '../componentes/TransactionFlow.jsx';
 import InvoicePaymentDialog from '../componentes/InvoicePaymentDialog.jsx';
 import { adicionarMesesCompetencia, nomeFatura } from '../servicos/cartoes.js';
@@ -34,7 +37,7 @@ function BadgesFatura({ fatura }) {
 }
 
 // Ícones operam sobre a COMPRA (via compraCartaoId), não sobre a parcela isolada.
-const ParcelaRow = ({ parcela, onEditarCompra, onExcluirCompra }) => {
+const ParcelaRow = ({ parcela, ehAssinatura = false, onEditarCompra, onExcluirCompra }) => {
   const ehParcelada = parcela.totalParcelas > 1;
   return (
     <div className="flex items-center gap-3 py-3">
@@ -42,6 +45,7 @@ const ParcelaRow = ({ parcela, onEditarCompra, onExcluirCompra }) => {
         <p className="font-medium text-foreground truncate">{parcela.descricao}</p>
         <p className="text-xs text-foreground-muted">
           {parcela.categoria} · {ehParcelada ? `Parcela ${parcela.parcelaAtual}/${parcela.totalParcelas}` : 'À vista'}
+          {ehAssinatura ? ' · Assinatura' : ''}
         </p>
         {ehParcelada && <p className="text-xs text-foreground-muted">Total da compra: {brl(parcela.valorTotalCompraCentavos)}</p>}
       </div>
@@ -88,6 +92,13 @@ const CartaoDetalhe = ({
   regrasCompra,
   validarAlteracaoCompras,
   contextoPagamento,
+  assinaturasCartao,
+  assinaturasIndisponiveis,
+  criarAssinaturaCartao,
+  editarAssinaturaCartao,
+  cancelarAssinaturaCartao,
+  excluirAssinaturaCartao,
+  podeExcluirAssinaturaCartao,
 }) => {
   const cartao = cartoes.find((c) => c.id === cartaoId);
   const resumo = cartao?.resumo;
@@ -96,10 +107,12 @@ const CartaoDetalhe = ({
 
   const competencias = useMemo(() => (aberta ? Array.from({ length: 12 }, (_, i) => adicionarMesesCompetencia(aberta, i - 8)) : []), [aberta]);
   const [competenciaSelecionada, setCompetenciaSelecionada] = useState(aberta);
-  const [aba, setAba] = useState('extrato'); // 'extrato' | 'compras'
+  const [aba, setAba] = useState('extrato'); // 'extrato' | 'compras' | 'assinaturas'
   const [cartaoEditandoAberto, setCartaoEditandoAberto] = useState(false);
   const [compraEditando, setCompraEditando] = useState(null);
   const [novaCompraAberta, setNovaCompraAberta] = useState(false);
+  // { modo: 'criar' } | { modo: 'menu' | 'editar', id } — gestão das assinaturas deste cartão
+  const [assinaturaDialogo, setAssinaturaDialogo] = useState(null);
   // { competencia, pagamento? } — pagamento presente = edição
   const [pagamentoDialogo, setPagamentoDialogo] = useState(null);
 
@@ -108,9 +121,12 @@ const CartaoDetalhe = ({
   }, []);
 
   const comprasDoCartao = useMemo(() => comprasCartao.filter((c) => c.cartaoId === cartaoId), [comprasCartao, cartaoId]);
+  const assinaturasDoCartao = useMemo(() => assinaturasCartao.filter((a) => a.cartaoId === cartaoId), [assinaturasCartao, cartaoId]);
   const gastosDoMes = useMemo(() => gastosNoCartaoNoMes({ compras: comprasCartao, cartaoId, hoje: new Date() }), [comprasCartao, cartaoId]);
 
   if (!cartao) return null;
+
+  const assinaturaSelecionada = assinaturaDialogo?.id ? assinaturasDoCartao.find((a) => a.id === assinaturaDialogo.id) : null;
 
   const faturaPorCompetencia = Object.fromEntries(resumo.faturas.map((f) => [f.competencia, f]));
   const faturaSelecionada = faturaPorCompetencia[competenciaSelecionada] ?? null;
@@ -190,6 +206,7 @@ const CartaoDetalhe = ({
         {[
           { valor: 'extrato', texto: 'Faturas' },
           { valor: 'compras', texto: 'Compras' },
+          { valor: 'assinaturas', texto: 'Assinaturas' },
         ].map((item) => (
           <SegmentGroup.Item key={item.valor} value={item.valor}>
             <SegmentGroup.ItemText
@@ -204,11 +221,19 @@ const CartaoDetalhe = ({
         ))}
       </SegmentGroup.Root>
 
-      {aba === 'compras' ? (
+      {aba === 'assinaturas' ? (
+        <SubscriptionsTab
+          assinaturas={assinaturasDoCartao}
+          indisponivel={assinaturasIndisponiveis}
+          onNova={() => setAssinaturaDialogo({ modo: 'criar' })}
+          onAbrir={(id) => setAssinaturaDialogo({ modo: 'menu', id })}
+        />
+      ) : aba === 'compras' ? (
         <CardPurchasesTab
           comprasDoCartao={comprasDoCartao}
           onEditarCompra={setCompraEditando}
           onAdicionarCompra={() => setNovaCompraAberta(true)}
+          onAdicionarAssinatura={assinaturasIndisponiveis ? undefined : () => setAssinaturaDialogo({ modo: 'criar' })}
           excluirCompra={excluirCompra}
           excluirVariasCompras={excluirVariasCompras}
         />
@@ -256,6 +281,7 @@ const CartaoDetalhe = ({
                     <ParcelaRow
                       key={p.id}
                       parcela={p}
+                      ehAssinatura={comprasCartao.find((c) => c.id === p.compraCartaoId)?.origem === 'assinatura'}
                       onEditarCompra={() => abrirEditarCompraPorId(p.compraCartaoId)}
                       onExcluirCompra={() => excluirCompraPorId(p.compraCartaoId)}
                     />
@@ -335,6 +361,50 @@ const CartaoDetalhe = ({
             onCompraAtualizada={handleCompraAtualizada}
             onExcluido={() => setCompraEditando(null)}
             excluirCompra={excluirCompra}
+          />
+        )}
+      </ResponsiveDialog>
+
+      <ResponsiveDialog aberto={assinaturaDialogo?.modo === 'criar'} aoFechar={() => setAssinaturaDialogo(null)}>
+        {assinaturaDialogo?.modo === 'criar' && (
+          <SubscriptionForm
+            cartao={cartao}
+            onVoltar={() => setAssinaturaDialogo(null)}
+            onSalvar={async (dados) => {
+              const ok = await criarAssinaturaCartao({ ...dados, cartaoId });
+              if (ok) setAssinaturaDialogo(null);
+              return ok;
+            }}
+          />
+        )}
+      </ResponsiveDialog>
+
+      <ResponsiveDialog aberto={assinaturaDialogo?.modo === 'menu' && !!assinaturaSelecionada} aoFechar={() => setAssinaturaDialogo(null)}>
+        {assinaturaDialogo?.modo === 'menu' && assinaturaSelecionada && (
+          <SubscriptionActions
+            key={assinaturaSelecionada.id}
+            assinatura={assinaturaSelecionada}
+            cartaoNome={cartao.nome}
+            podeExcluir={podeExcluirAssinaturaCartao(assinaturaSelecionada)}
+            onEditar={(a) => setAssinaturaDialogo({ modo: 'editar', id: a.id })}
+            onCancelar={cancelarAssinaturaCartao}
+            onExcluir={excluirAssinaturaCartao}
+            onFechar={() => setAssinaturaDialogo(null)}
+          />
+        )}
+      </ResponsiveDialog>
+
+      <ResponsiveDialog aberto={assinaturaDialogo?.modo === 'editar' && !!assinaturaSelecionada} aoFechar={() => setAssinaturaDialogo(null)}>
+        {assinaturaDialogo?.modo === 'editar' && assinaturaSelecionada && (
+          <SubscriptionForm
+            cartao={cartao}
+            assinaturaParaEditar={assinaturaSelecionada}
+            onVoltar={() => setAssinaturaDialogo(null)}
+            onSalvar={async (dados) => {
+              const ok = await editarAssinaturaCartao(assinaturaSelecionada, dados);
+              if (ok) setAssinaturaDialogo(null);
+              return ok;
+            }}
           />
         )}
       </ResponsiveDialog>
