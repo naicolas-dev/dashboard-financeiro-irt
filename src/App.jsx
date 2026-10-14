@@ -78,6 +78,7 @@ function App() {
       excluirTransacao={dados.excluirTransacao}
       handleCompraAtualizada={dados.handleCompraAtualizada}
       regrasCompra={dados.regrasCompra}
+      validarAlteracaoCompras={dados.validarAlteracaoCompras}
       contextoPagamento={dados.contextoPagamento}
     />
   );

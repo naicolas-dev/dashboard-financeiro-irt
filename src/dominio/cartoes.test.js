@@ -15,6 +15,8 @@ import {
   resumoDoCartao,
   maximoPagamentoCentavos,
   regrasDaCompra,
+  validarAlteracaoDeCompras,
+  excedentePagoSemDividaCentavos,
   validarPagamento,
   gastosNoCartaoNoMes,
 } from './cartoes.js';
@@ -115,6 +117,86 @@ describe('casos do pedido', () => {
     const r = resumoDoCartao({ cartao: NUBANK, compras: [], pagamentos, hoje: HOJE });
     assert.equal(r.dividaCentavos, 0);
     assert.equal(r.limiteDisponivelCentavos, 500000);
+  });
+});
+
+describe('alterar/excluir compra com pagamento existente (estado resultante)', () => {
+  // Compra à vista de 1.000 → uma única fatura (2026-11), paga conforme o caso.
+  const mil = compra('mil', 1000, 1, '2026-10-12T15:00');
+  const args = (compras, pagamentos, extra) => ({ cartao: NUBANK, compras, pagamentos, hoje: HOJE, ...extra });
+  const editadaPara = (c, valorTotal, numeroParcelas = c.numeroParcelas) => ({ ...c, valorTotal, numeroParcelas });
+
+  test('compra 1000 / pago 300 / editar para 800 → permitido', () => {
+    const v = validarAlteracaoDeCompras(args([mil], [pagamento('p', 300, '2026-11')], { substituir: [editadaPara(mil, 800)] }));
+    assert.deepEqual(v, { ok: true, excedenteCentavos: 0, mensagem: null });
+  });
+
+  test('compra 1000 / pago 1000 / editar para 700 → bloqueado, excedente 300', () => {
+    const v = validarAlteracaoDeCompras(args([mil], [pagamento('p', 1000, '2026-11')], { substituir: [editadaPara(mil, 700)] }));
+    assert.equal(v.ok, false);
+    assert.equal(v.excedenteCentavos, 30000);
+    assert.match(v.mensagem, /R\$\s?300,00/);
+    assert.match(v.mensagem, /Edite ou exclua o pagamento/);
+  });
+
+  test('compra 1000 / pago 1000 / excluir → bloqueado, excedente 1000', () => {
+    const v = validarAlteracaoDeCompras(args([mil], [pagamento('p', 1000, '2026-11')], { removerIds: ['mil'] }));
+    assert.equal(v.ok, false);
+    assert.equal(v.excedenteCentavos, 100000);
+    assert.match(v.mensagem, /excluir/);
+  });
+
+  test('compra 1000 / pago 300 / excluir → bloqueado, excedente 300', () => {
+    const v = validarAlteracaoDeCompras(args([mil], [pagamento('p', 300, '2026-11')], { removerIds: ['mil'] }));
+    assert.equal(v.ok, false);
+    assert.equal(v.excedenteCentavos, 30000);
+  });
+
+  test('compra sem pagamentos → editar e excluir normalmente', () => {
+    assert.equal(validarAlteracaoDeCompras(args([mil], [], { substituir: [editadaPara(mil, 1)] })).ok, true);
+    assert.equal(validarAlteracaoDeCompras(args([mil], [], { removerIds: ['mil'] })).ok, true);
+  });
+
+  test('alterar só descrição/categoria não muda valor → sem excedente mesmo com tudo pago', () => {
+    const pagamentos = [pagamento('p', 1000, '2026-11')];
+    const renomeada = { ...mil, descricao: 'outra', categoria: 'Lazer' };
+    assert.equal(excedentePagoSemDividaCentavos(args([renomeada], pagamentos)), 0);
+    assert.equal(validarAlteracaoDeCompras(args([mil], pagamentos, { substituir: [renomeada] })).ok, true);
+  });
+
+  test('antecipação continua válida: excedente que cabe em dívida futura real não bloqueia', () => {
+    // 6x de 200 (nov..abr). Pagamento de 500 em nov: 200 quita nov, 300 antecipa dez/jan.
+    const seis = compra('seis', 1200, 6, '2026-10-12T15:00');
+    const pagamentos = [pagamento('p', 500, '2026-11')];
+    assert.equal(excedentePagoSemDividaCentavos(args([seis], pagamentos)), 0);
+    // Reduzir para 3x (400 cada...) ainda comporta os 500: sem bloqueio.
+    assert.equal(validarAlteracaoDeCompras(args([seis], pagamentos, { substituir: [editadaPara(seis, 1200, 3)] })).ok, true);
+    // Reduzir o total para 400 (200+200): 500 > 400 → excedente 100.
+    const v = validarAlteracaoDeCompras(args([seis], pagamentos, { substituir: [editadaPara(seis, 400, 2)] }));
+    assert.equal(v.ok, false);
+    assert.equal(v.excedenteCentavos, 10000);
+  });
+
+  test('várias compras: excluir uma só bloqueia se os pagamentos deixarem de caber nas restantes', () => {
+    const a = compra('a', 600, 1, '2026-10-12T15:00');
+    const b = compra('b', 400, 1, '2026-10-12T15:00');
+    const pagamentos = [pagamento('p', 800, '2026-11')];
+    assert.equal(validarAlteracaoDeCompras(args([a, b], pagamentos, { removerIds: ['b'] })).ok, false); // sobram 600 < 800
+    assert.equal(validarAlteracaoDeCompras(args([a, b], pagamentos, { removerIds: ['b'] })).excedenteCentavos, 20000);
+    assert.equal(validarAlteracaoDeCompras(args([a, b], [pagamento('p', 600, '2026-11')], { removerIds: ['b'] })).ok, true);
+  });
+
+  test('o domínio nunca altera os pagamentos nem a lista de compras recebida', () => {
+    const pagamentos = [pagamento('p', 1000, '2026-11')];
+    const antes = JSON.stringify({ pagamentos, mil });
+    validarAlteracaoDeCompras(args([mil], pagamentos, { removerIds: ['mil'] }));
+    assert.equal(JSON.stringify({ pagamentos, mil }), antes);
+  });
+
+  test('pagamento sobre competência sem dívida (nada a partir dela) conta como excedente', () => {
+    // Pagamento aponta pra fatura de dezembro, mas a compra só tem parcela em novembro.
+    const v = excedentePagoSemDividaCentavos(args([mil], [pagamento('p', 300, '2026-12')]));
+    assert.equal(v, 30000);
   });
 });
 

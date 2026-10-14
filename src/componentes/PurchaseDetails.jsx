@@ -15,8 +15,10 @@ const OPCOES_NUMERO_PARCELAS = OPCOES_PARCELAS.map((n) => ({ valor: String(n), t
 // Edição da compra (as parcelas são derivadas dela). `regras` vem do domínio: com
 // parcela em fatura fechada ou paga tudo continua editável, mas com `regras.aviso`
 // visível (muda o total dessas faturas; pagamentos não mudam).
-// `primeiraCompetencia` nunca é tocada aqui.
-const PurchaseDetails = ({ compra, cartao, regras, onVoltar, onCompraAtualizada, onExcluido, excluirCompra }) => {
+// `primeiraCompetencia` nunca é tocada aqui. Mudar valor/parcelas passa por
+// `validarAlteracaoCompras` (domínio): se os pagamentos existentes passassem da dívida
+// resultante, o salvamento é bloqueado e a mensagem diz quanto sobraria pago.
+const PurchaseDetails = ({ compra, cartao, regras, validarAlteracaoCompras, onVoltar, onCompraAtualizada, onExcluido, excluirCompra }) => {
   const [descricao, setDescricao] = useState(compra.descricao);
   const [categoria, setCategoria] = useState(compra.categoria);
   const [valorCentavos, setValorCentavos] = useState(String(Math.round(compra.valorTotal * 100)));
@@ -25,10 +27,16 @@ const PurchaseDetails = ({ compra, cartao, regras, onVoltar, onCompraAtualizada,
   const [excluindo, setExcluindo] = useState(false);
 
   const valorNumerico = Number(valorCentavos || '0') / 100;
-  const podeSalvar = descricao.trim() !== '' && categoria !== '' && valorNumerico > 0 && !salvando;
 
   const valorOriginalCentavos = String(Math.round(compra.valorTotal * 100));
   const alterarValor = valorCentavos !== valorOriginalCentavos || numeroParcelas !== compra.numeroParcelas;
+
+  // Só alteração de valor/parcelas é financeira; descrição/categoria nunca bloqueia.
+  const validacao = alterarValor && valorNumerico > 0
+    ? validarAlteracaoCompras({ substituir: [{ ...compra, valorTotal: valorNumerico, numeroParcelas }] })
+    : { ok: true, mensagem: null };
+
+  const podeSalvar = descricao.trim() !== '' && categoria !== '' && valorNumerico > 0 && validacao.ok && !salvando;
 
   const handleValorChange = (e) => {
     const digitos = e.target.value.replace(/\D/g, '');
@@ -36,7 +44,7 @@ const PurchaseDetails = ({ compra, cartao, regras, onVoltar, onCompraAtualizada,
   };
 
   const salvar = async () => {
-    if (salvando) return;
+    if (salvando || !podeSalvar) return;
     setSalvando(true);
     try {
       const compraAtualizada = await atualizarCompraCartao({
@@ -105,7 +113,13 @@ const PurchaseDetails = ({ compra, cartao, regras, onVoltar, onCompraAtualizada,
         />
       </div>
 
-      {regras.aviso && (
+      {!validacao.ok && (
+        <p role="alert" className="rounded-xl bg-negative/10 text-negative text-sm p-3">
+          {validacao.mensagem}
+        </p>
+      )}
+
+      {regras.aviso && validacao.ok && (
         <p className="rounded-xl bg-warning/10 text-warning text-xs p-3">
           {regras.aviso} Hoje: {formatadorMoeda.format(compra.valorTotal)} · {rotuloParcelas(compra.numeroParcelas)}.
         </p>

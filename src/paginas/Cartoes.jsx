@@ -50,6 +50,7 @@ const Cartoes = ({
   excluirTransacao,
   handleCompraAtualizada,
   regrasCompra,
+  validarAlteracaoCompras,
   contextoPagamento,
 }) => {
   const [cartaoSelecionadoId, setCartaoSelecionadoId] = useState(null);
@@ -75,6 +76,7 @@ const Cartoes = ({
         excluirTransacao={excluirTransacao}
         handleCompraAtualizada={handleCompraAtualizada}
         regrasCompra={regrasCompra}
+        validarAlteracaoCompras={validarAlteracaoCompras}
         contextoPagamento={contextoPagamento}
       />
     );

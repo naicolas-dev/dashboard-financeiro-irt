@@ -85,6 +85,7 @@ const CartaoDetalhe = ({
   excluirTransacao,
   handleCompraAtualizada,
   regrasCompra,
+  validarAlteracaoCompras,
   contextoPagamento,
 }) => {
   const cartao = cartoes.find((c) => c.id === cartaoId);
@@ -328,6 +329,7 @@ const CartaoDetalhe = ({
             compra={compraEditando}
             cartao={cartao}
             regras={regrasCompra(compraEditando)}
+            validarAlteracaoCompras={validarAlteracaoCompras}
             onVoltar={() => setCompraEditando(null)}
             onCompraAtualizada={handleCompraAtualizada}
             onExcluido={() => setCompraEditando(null)}

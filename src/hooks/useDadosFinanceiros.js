@@ -8,6 +8,7 @@ import {
   parcelasDaCompra,
   resumoDoCartao,
   regrasDaCompra,
+  validarAlteracaoDeCompras,
   faturasDoCartao,
   maximoPagamentoCentavos,
   paraReais,
@@ -457,6 +458,25 @@ export function useDadosFinanceiros(usuario) {
     [cartoesBase, comprasCartao, pagamentosFatura]
   );
 
+  // Valida (no domínio) uma alteração financeira em compras pelo estado RESULTANTE,
+  // um cartão por vez: se os pagamentos existentes passariam da dívida que sobraria,
+  // devolve { ok:false, mensagem }. Nunca escreve nada.
+  const validarAlteracaoCompras = useCallback(
+    ({ removerIds = [], substituir = [] }) => {
+      const hoje = new Date();
+      const afetadas = [...removerIds, ...substituir.map((s) => s.id)];
+      const cartaoIds = new Set(comprasCartao.filter((c) => afetadas.includes(c.id)).map((c) => c.cartaoId));
+      for (const cartaoId of cartaoIds) {
+        const cartao = cartoesBase.find((c) => c.id === cartaoId);
+        if (!cartao) continue;
+        const resultado = validarAlteracaoDeCompras({ cartao, compras: comprasCartao, pagamentos: pagamentosFatura, hoje, removerIds, substituir });
+        if (!resultado.ok) return resultado;
+      }
+      return { ok: true, excedenteCentavos: 0, mensagem: null };
+    },
+    [cartoesBase, comprasCartao, pagamentosFatura]
+  );
+
   // Tudo que o diálogo de pagamento precisa saber sobre uma fatura. Na edição, o
   // próprio pagamento sai da conta (restante e máximo como se ele não existisse).
   const contextoPagamento = useCallback(
@@ -531,10 +551,16 @@ export function useDadosFinanceiros(usuario) {
     [comprasCartao, pagamentosFatura, confirmarExclusao]
   );
 
-  // Permitido mesmo com fatura fechada/paga (pode ter sido lançamento errado), mas a
-  // confirmação deixa claro o efeito: o total das faturas muda, pagamentos não.
+  // Permitido mesmo com fatura fechada/paga (pode ter sido lançamento errado), desde
+  // que os pagamentos existentes continuem cabendo na dívida que sobrar. Se não
+  // couberem, bloqueia ANTES de abrir qualquer confirmação (nada é alterado).
   const excluirCompra = useCallback(
     (compra) => {
+      const validacao = validarAlteracaoCompras({ removerIds: [compra.id] });
+      if (!validacao.ok) {
+        toast.error(validacao.mensagem, { duration: 9000 });
+        return false;
+      }
       const regras = regrasCompra(compra);
       return confirmarExclusao({
         titulo: 'Excluir compra?',
@@ -553,17 +579,22 @@ export function useDadosFinanceiros(usuario) {
         },
       });
     },
-    [regrasCompra, confirmarExclusao]
+    [regrasCompra, validarAlteracaoCompras, confirmarExclusao]
   );
 
   const excluirVariasCompras = useCallback(
     (compras) => {
+      const validacao = validarAlteracaoCompras({ removerIds: compras.map((c) => c.id) });
+      if (!validacao.ok) {
+        toast.error(validacao.mensagem, { duration: 9000 });
+        return false;
+      }
       const comHistorico = compras.filter((c) => regrasCompra(c).temHistorico).length;
       return confirmarExclusao({
         titulo: `Excluir ${compras.length} ${compras.length === 1 ? 'compra' : 'compras'}?`,
         descricao:
           comHistorico > 0
-            ? `${comHistorico === 1 ? '1 delas já tem' : `${comHistorico} delas já têm`} parcela em fatura fechada ou paga — o total dessas faturas muda; os pagamentos já registrados continuam como estão.`
+            ? `${comHistorico === 1 ? '1 delas já tem' : `${comHistorico} delas já têm`} parcela em fatura fechada ou paga — o total dessas faturas muda; os pagamentos já registrados não são alterados.`
             : 'As compras selecionadas e as parcelas delas saem das faturas.',
         acao: async () => {
           const idsCompras = new Set(compras.map((c) => c.id));
@@ -580,7 +611,7 @@ export function useDadosFinanceiros(usuario) {
         },
       });
     },
-    [regrasCompra, confirmarExclusao]
+    [regrasCompra, validarAlteracaoCompras, confirmarExclusao]
   );
 
   // Parcelas são derivadas da compra — basta trocar o documento.
@@ -613,6 +644,7 @@ export function useDadosFinanceiros(usuario) {
     pagamentosFatura,
     handlePagamentoSalvo,
     regrasCompra,
+    validarAlteracaoCompras,
     contextoPagamento,
     handleRecorrenciaSalva,
     handleRecorrenciaExcluida,

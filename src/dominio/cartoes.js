@@ -238,12 +238,46 @@ export function resumoDoCartao({ cartao, compras, pagamentos, hoje }) {
   };
 }
 
+// Quanto do que já foi PAGO deste cartão não encontra dívida correspondente (a partir
+// da competência de cada pagamento, pra frente). Fonte: o mesmo `alocarPagamentos` de
+// sempre — nada de cálculo paralelo. Saldo credor de cartão não é modelado, então
+// qualquer valor > 0 aqui é um estado inválido.
+export function excedentePagoSemDividaCentavos({ cartao, compras, pagamentos, hoje }) {
+  const { porPagamento } = faturasDoCartao({ cartao, compras, pagamentos, hoje });
+  return Object.values(porPagamento).reduce((acc, p) => acc + p.naoAlocadoCentavos, 0);
+}
+
+const formatadorMoeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
+// Valida uma alteração FINANCEIRA em compras (editar valor/parcelas ou excluir) pelo
+// estado resultante: se, depois dela, os pagamentos existentes passariam da dívida
+// restante, a alteração é bloqueada — sem mexer em pagamento nenhum; o usuário ajusta
+// ou exclui o pagamento primeiro. Antecipação segue válida: o excedente de uma fatura
+// que cabe em dívida futura REAL não conta como excesso.
+//   removerIds  — compras que seriam excluídas
+//   substituir  — compras com valorTotal/numeroParcelas novos (mesmo id)
+// Alteração só de descrição/categoria não passa por aqui (não muda nenhum valor).
+export function validarAlteracaoDeCompras({ cartao, compras, pagamentos, hoje, removerIds = [], substituir = [] }) {
+  const resultantes = compras
+    .filter((c) => !removerIds.includes(c.id))
+    .map((c) => substituir.find((s) => s.id === c.id) ?? c);
+  const excedenteCentavos = excedentePagoSemDividaCentavos({ cartao, compras: resultantes, pagamentos, hoje });
+  if (excedenteCentavos <= 0) return { ok: true, excedenteCentavos: 0, mensagem: null };
+
+  const valor = formatadorMoeda.format(excedenteCentavos / 100);
+  const acao = removerIds.length > 0 ? 'Não é possível excluir' : 'Não é possível salvar esta alteração';
+  return {
+    ok: false,
+    excedenteCentavos,
+    mensagem: `${acao}: ${valor} já pagos no ${cartao.nome} ficariam sem dívida correspondente. Edite ou exclua o pagamento da fatura primeiro.`,
+  };
+}
+
 // Compra com qualquer parcela numa fatura que já fechou OU que já recebeu pagamento
-// (inclusive por antecipação) tem histórico financeiro. Editar/excluir continua
-// permitido (pode ter sido um lançamento errado), mas nunca em silêncio: a UI mostra
-// `aviso` antes de confirmar. Pagamentos já registrados nunca mudam — o que mudar é o
-// total das faturas; se um pagamento passar a sobrar, a alocação o empurra pras
-// faturas seguintes.
+// (inclusive por antecipação) tem histórico financeiro. Editar/excluir é permitido
+// (pode ter sido um lançamento errado) desde que `validarAlteracaoDeCompras` aprove, e
+// nunca em silêncio: a UI mostra `aviso` antes de confirmar. Pagamentos nunca são
+// alterados automaticamente.
 export function regrasDaCompra({ compra, cartao, compras, pagamentos, hoje }) {
   const { faturas } = faturasDoCartao({ cartao, compras, pagamentos, hoje });
   const porCompetencia = Object.fromEntries(faturas.map((f) => [f.competencia, f]));
@@ -256,7 +290,7 @@ export function regrasDaCompra({ compra, cartao, compras, pagamentos, hoje }) {
     podeExcluir: true,
     temHistorico,
     aviso: temHistorico
-      ? 'Esta compra já tem parcela em fatura fechada ou paga. Alterar ou excluir muda o total dessas faturas; os pagamentos já registrados continuam como estão.'
+      ? 'Esta compra já tem parcela em fatura fechada ou paga. Alterar ou excluir muda o total dessas faturas; os pagamentos já registrados não são alterados.'
       : null,
   };
 }
