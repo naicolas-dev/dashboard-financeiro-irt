@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { collection, query, orderBy, where, getDocs, doc, deleteDoc, addDoc, updateDoc, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, deleteDoc, addDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { db } from '../firebase/configuracao';
 import { buscarPagamentosDeFatura, excluirCompraCartao, excluirComprasCartaoEmLote } from '../servicos/cartoes.js';
@@ -13,18 +13,22 @@ import {
   maximoPagamentoCentavos,
   paraReais,
 } from '../dominio/cartoes.js';
+import {
+  calcularSaldoFinanceiroCentavos,
+  calcularSaldoDisponivelCentavos,
+  movimentacoesRealizadas,
+  movimentacoesComDataInvalida,
+  resumoDoHero,
+  resultadoDoMesCentavos,
+} from '../dominio/caixa.js';
+import { paraTimestamp, compararPorTempoDesc, inicioDoDiaLocal, fimDoDiaLocal } from '../dominio/tempo.js';
 
-const MESES_DE_HISTORICO_PADRAO = 12;
+const QUANTIDADE_DE_RECENTES = 5;
 
-function inicioPadrao() {
-  const data = new Date();
-  data.setMonth(data.getMonth() - MESES_DE_HISTORICO_PADRAO);
-  data.setHours(0, 0, 0, 0);
-  return data;
-}
-
+// Toda ordenação de transações é por TEMPO REAL (dominio/tempo.js), nunca por string:
+// os documentos misturam 'YYYY-MM-DDTHH:mm' (hora local) e ISO com Z (UTC).
 function ordenarPorDataDesc(lista) {
-  return [...lista].sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : 0));
+  return [...lista].sort(compararPorTempoDesc);
 }
 
 // Metas antigas (legado, de antes da Fase 2) guardam o valor guardado em `valorAtual`;
@@ -42,14 +46,12 @@ async function buscarTodos(nomeColecao) {
   return snapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
 }
 
-async function buscarTransacoesEntre(inicio, fim) {
-  const q = query(
-    collection(db, 'transacoes'),
-    where('data', '>=', inicio.toISOString()),
-    where('data', '<=', fim.toISOString()),
-    orderBy('data', 'desc')
-  );
-  const snapshot = await getDocs(q);
+// Livro-caixa INTEIRO, sem janela: o saldo é posição acumulada e não pode expirar com a
+// idade da movimentação. Sem where/orderBy (nem índice): a ordem é feita em memória por
+// tempo real, porque o campo `data` tem formatos diferentes que o Firestore compararia
+// como string. Volume atual: dezenas de documentos.
+async function buscarTodasTransacoes() {
+  const snapshot = await getDocs(collection(db, 'transacoes'));
   return snapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
 }
 
@@ -102,8 +104,8 @@ async function processarRecorrenciasDevidas(recorrencias) {
 // o cache de intervalo de datas e a sincronização do estado local depois de cada
 // escrita ficam todos aqui — App.jsx passa a só compor a interface.
 export function useDadosFinanceiros(usuario) {
-  // `transacoesCarregadas` = documentos crus da janela; tudo que o resto do app vê
-  // passa por `movimentacoesDeCaixa` (logo abaixo) — ponto único da regra.
+  // `transacoesCarregadas` = documentos crus de `transacoes`; tudo que o resto do app
+  // vê passa por `movimentacoesDeCaixa` (logo abaixo) — ponto único da regra.
   const [transacoesCarregadas, setTransacoes] = useState([]);
   const [metas, setMetas] = useState([]);
   const [recorrencias, setRecorrencias] = useState([]);
@@ -117,13 +119,13 @@ export function useDadosFinanceiros(usuario) {
   // informação financeira real.
   const [erroCarregamento, setErroCarregamento] = useState(false);
 
+  // Só filtros de EXIBIÇÃO (Movimentações). Não participam do saldo.
   const [dataInicio, setDataInicio] = useState(null);
   const [dataFim, setDataFim] = useState(null);
   const [filtroCategoria, setFiltroCategoria] = useState('todas');
   const [filtroTipo, setFiltroTipo] = useState('todos');
 
   const recorrenciasProcessadas = useRef(false);
-  const janelaInicioRef = useRef(null);
 
   useEffect(() => {
     if (!usuario) {
@@ -159,14 +161,9 @@ export function useDadosFinanceiros(usuario) {
       }
 
       try {
-        const inicio = inicioPadrao();
-        janelaInicioRef.current = inicio;
-        const fim = new Date();
-        fim.setDate(fim.getDate() + 1);
-
-        const [transacoesDaJanela, metasCarregadas, recorrenciasCarregadas, cartoesCarregados, comprasCartaoCarregadas, pagamentosCarregados] =
+        const [todasAsTransacoes, metasCarregadas, recorrenciasCarregadas, cartoesCarregados, comprasCartaoCarregadas, pagamentosCarregados] =
           await Promise.all([
-            buscarTransacoesEntre(inicio, fim),
+            buscarTodasTransacoes(),
             buscarTodos('metas'),
             buscarTodos('transacoesRecorrentes'),
             buscarTodos('cartoes'),
@@ -174,7 +171,7 @@ export function useDadosFinanceiros(usuario) {
             buscarPagamentosDeFatura(),
           ]);
 
-        let transacoesFinais = transacoesDaJanela;
+        let transacoesFinais = todasAsTransacoes;
         let recorrenciasFinais = recorrenciasCarregadas;
 
         if (!recorrenciasProcessadas.current) {
@@ -208,37 +205,18 @@ export function useDadosFinanceiros(usuario) {
     };
   }, [usuario]);
 
-  // Se o usuário escolher manualmente uma data anterior à janela já carregada,
-  // busca só o intervalo que falta e mescla no estado (sem refazer tudo).
-  useEffect(() => {
-    if (!usuario || !dataInicio || !janelaInicioRef.current) return;
-
-    const inicioDesejado = new Date(dataInicio);
-    if (inicioDesejado >= janelaInicioRef.current) return;
-
-    const fimDoIntervaloFaltante = new Date(janelaInicioRef.current);
-    fimDoIntervaloFaltante.setDate(fimDoIntervaloFaltante.getDate() - 1);
-
-    buscarTransacoesEntre(inicioDesejado, fimDoIntervaloFaltante)
-      .then((novasTransacoes) => {
-        if (novasTransacoes.length === 0) return;
-        setTransacoes((prev) => ordenarPorDataDesc([...prev, ...novasTransacoes]));
-      })
-      .catch((erro) => console.error('Erro ao carregar período adicional:', erro));
-
-    janelaInicioRef.current = inicioDesejado;
-  }, [usuario, dataInicio]);
-
   // Livro-caixa: o que o app inteiro (saldo, Home, Movimentações) enxerga como
   // `transacoes`. Parcelas legadas do modelo antigo, se existirem, ficam de fora.
   const transacoes = useMemo(() => movimentacoesDeCaixa(transacoesCarregadas), [transacoesCarregadas]);
 
+  // Filtro de exibição: início/fim do DIA LOCAL (um 'YYYY-MM-DD' não vira meia-noite UTC)
+  // comparados com o instante real da transação.
   const transacoesFiltradas = useMemo(() => {
+    const inicioFiltro = dataInicio ? inicioDoDiaLocal(dataInicio) : null;
+    const fimFiltro = dataFim ? fimDoDiaLocal(dataFim) : null;
     return transacoes.filter((t) => {
-      const dataTransacao = new Date(t.data);
-      const dataFimAjustada = dataFim ? new Date(dataFim) : null;
-      if (dataFimAjustada) dataFimAjustada.setHours(23, 59, 59, 999);
-      const passaFiltroData = (!dataInicio || dataTransacao >= new Date(dataInicio)) && (!dataFimAjustada || dataTransacao <= dataFimAjustada);
+      const instante = paraTimestamp(t.data);
+      const passaFiltroData = (inicioFiltro === null || instante >= inicioFiltro) && (fimFiltro === null || instante <= fimFiltro);
       const passaFiltroCategoria = filtroCategoria === 'todas' || t.categoria === filtroCategoria;
       const passaFiltroTipo = filtroTipo === 'todos' || t.tipo === filtroTipo;
       return passaFiltroData && passaFiltroCategoria && passaFiltroTipo;
@@ -372,20 +350,38 @@ export function useDadosFinanceiros(usuario) {
     [confirmarExclusao]
   );
 
-  // Mesma fórmula do `resumo.saldo` calculado em Home.jsx (receitas - despesas da
-  // janela de 12 meses). Duplicada aqui de propósito — não extraída pra um util
-  // compartilhado nem usada pra substituir o cálculo da Home, pra não expandir esta
-  // tarefa (Metas) pra uma refatoração do hook/Home. Se um dia virar fonte única,
-  // os dois lugares precisam ficar sincronizados.
-  const saldoFinanceiro = useMemo(() => {
-    const receitas = transacoes.filter((t) => t.tipo === 'receita').reduce((acc, t) => acc + t.valor, 0);
-    const despesas = transacoes.filter((t) => t.tipo === 'despesa').reduce((acc, t) => acc + t.valor, 0);
-    return receitas - despesas;
+  // SALDO = posição acumulada de todo o livro-caixa realizado (data ≤ agora); métricas
+  // de período (Entradas/Saídas do Hero, resultado do mês) são outra coisa. Uma única
+  // implementação, no domínio (dominio/caixa.js) — Home e Metas só consomem estes valores.
+  // `agora` é capturado a cada mudança da lista: um movimento com data futura passa a
+  // contar quando a lista é recalculada depois do instante dele (ou ao reabrir o app).
+  const caixa = useMemo(() => {
+    const agora = new Date();
+    const saldoCentavos = calcularSaldoFinanceiroCentavos(transacoes, agora);
+    const hero = resumoDoHero(transacoes, agora);
+    return {
+      saldoCentavos,
+      entradas: hero.entradasCentavos / 100,
+      saidas: hero.saidasCentavos / 100,
+      resultadoMes: resultadoDoMesCentavos(transacoes, agora) / 100,
+      recentes: movimentacoesRealizadas(transacoes, agora).sort(compararPorTempoDesc).slice(0, QUANTIDADE_DE_RECENTES),
+    };
   }, [transacoes]);
+
+  // Documento de caixa com data que não dá pra interpretar fica fora do saldo — avisa,
+  // nunca silencioso.
+  useEffect(() => {
+    const invalidas = movimentacoesComDataInvalida(transacoes);
+    if (invalidas.length > 0) {
+      console.warn(`${invalidas.length} transação(ões) com data inválida ficaram fora do saldo:`, invalidas.map((t) => t.id));
+    }
+  }, [transacoes]);
+
+  const saldoFinanceiro = caixa.saldoCentavos / 100;
 
   const totalReservadoMetas = useMemo(() => metas.reduce((acc, m) => acc + (m.valorReservado || 0), 0), [metas]);
 
-  const saldoDisponivel = saldoFinanceiro - totalReservadoMetas;
+  const saldoDisponivel = calcularSaldoDisponivelCentavos(caixa.saldoCentavos, Math.round(totalReservadoMetas * 100)) / 100;
 
   const handleRecorrenciaSalva = useCallback((recorrenciaSalva) => {
     setRecorrencias((prev) => {
@@ -641,6 +637,10 @@ export function useDadosFinanceiros(usuario) {
     totalReservadoMetas,
     saldoFinanceiro,
     saldoDisponivel,
+    entradasHero: caixa.entradas,
+    saidasHero: caixa.saidas,
+    resultadoMes: caixa.resultadoMes,
+    transacoesRecentes: caixa.recentes,
     pagamentosFatura,
     handlePagamentoSalvo,
     regrasCompra,

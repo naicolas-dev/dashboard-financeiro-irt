@@ -88,6 +88,11 @@ const FinancialHero = ({
           </div>
         </div>
       </div>
+      {!dadosIndisponiveis && (
+        // Saldo é acumulado; Entradas/Saídas são do período — a legenda evita ler
+        // "saldo = Entradas − Saídas".
+        <p className="-mt-3 text-xs text-foreground-muted">Entradas e saídas dos últimos 12 meses</p>
+      )}
 
       {metaDestaque && !modoRecorrentes && (
         <button

@@ -4,6 +4,7 @@ import Input from './ui/Input';
 import Button from './ui/Button';
 import DateTimeField from './ui/DateTimeField';
 import { obterDataHoraLocal } from '../utils/datas.js';
+import { paraInputLocal } from '../dominio/tempo.js';
 import { criarPagamentoFatura, atualizarPagamentoFatura, nomeFatura } from '../servicos/cartoes.js';
 import { validarPagamento, paraCentavos } from '../dominio/cartoes.js';
 
@@ -31,7 +32,7 @@ const InvoicePaymentDialog = ({
   const [valorCentavos, setValorCentavos] = useState(() =>
     String(modoEdicao ? paraCentavos(pagamentoParaEditar.valor) : Math.min(restanteFaturaCentavos, maximoCentavos))
   );
-  const [data, setData] = useState(() => (modoEdicao ? pagamentoParaEditar.data.slice(0, 16) : obterDataHoraLocal()));
+  const [data, setData] = useState(() => (modoEdicao ? paraInputLocal(pagamentoParaEditar.data) : obterDataHoraLocal()));
   const [confirmandoAviso, setConfirmandoAviso] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);

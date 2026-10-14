@@ -1,3 +1,9 @@
+import { paraTimestamp } from '../dominio/tempo.js';
+
+// Exibição apenas: a interpretação do texto de data é sempre do domínio (tempo.js),
+// nunca `new Date(string)` direto — os documentos misturam hora local e UTC.
+const paraData = (valor) => new Date(paraTimestamp(valor));
+
 // Hora local no formato do <input type="datetime-local">. Não usar toISOString()
 // direto aqui — ele converte pra UTC e desalinha a data exibida no formulário.
 export function obterDataHoraLocal() {
@@ -13,7 +19,7 @@ function mesmoDia(a, b) {
 // Usado nas linhas de transação (Home + Movimentações): "Hoje, 14:32" / "Ontem" /
 // "12 de outubro".
 export function formatarDataRelativa(isoString) {
-  const data = new Date(isoString);
+  const data = paraData(isoString);
   const hoje = new Date();
   const ontem = new Date(hoje);
   ontem.setDate(hoje.getDate() - 1);
@@ -27,7 +33,7 @@ export function formatarDataRelativa(isoString) {
 // Cabeçalho de grupo em Movimentações (o dia inteiro vira o header; a linha abaixo
 // mostra só a hora) — por isso inclui o ano, diferente de `formatarDataRelativa`.
 export function formatarCabecalhoData(isoString) {
-  const data = new Date(isoString);
+  const data = paraData(isoString);
   const hoje = new Date();
   const ontem = new Date(hoje);
   ontem.setDate(hoje.getDate() - 1);
@@ -38,5 +44,5 @@ export function formatarCabecalhoData(isoString) {
 }
 
 export function formatarHora(isoString) {
-  return new Date(isoString).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return paraData(isoString).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }

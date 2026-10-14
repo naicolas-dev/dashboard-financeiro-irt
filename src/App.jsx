@@ -22,7 +22,11 @@ function App() {
 
   const home = (
     <Home
-      transacoes={dados.transacoes}
+      saldoFinanceiro={dados.saldoFinanceiro}
+      entradas={dados.entradasHero}
+      saidas={dados.saidasHero}
+      resultadoMes={dados.resultadoMes}
+      transacoesRecentes={dados.transacoesRecentes}
       carregando={dados.carregando}
       erroCarregamento={dados.erroCarregamento}
       handleTransacaoSalva={dados.handleTransacaoSalva}

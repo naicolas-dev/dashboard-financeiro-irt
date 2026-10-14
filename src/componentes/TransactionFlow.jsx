@@ -9,6 +9,7 @@ import InstallmentsPicker from './InstallmentsPicker';
 import { criarTransacao, atualizarTransacao } from '../servicos/transacoes.js';
 import { criarCompraCartao } from '../servicos/cartoes.js';
 import { obterDataHoraLocal } from '../utils/datas.js';
+import { paraInputLocal } from '../dominio/tempo.js';
 
 function estadoInicial(tipoInicial, transacaoParaEditar) {
   if (transacaoParaEditar) {
@@ -47,7 +48,7 @@ const TransactionFlow = ({
     valorCentavos: modoEdicao ? String(Math.round(transacaoParaEditar.valor * 100)) : '0',
     categoria: modoEdicao ? transacaoParaEditar.categoria : '',
     descricao: modoEdicao ? transacaoParaEditar.descricao : '',
-    data: modoEdicao ? transacaoParaEditar.data.slice(0, 16) : obterDataHoraLocal(),
+    data: modoEdicao ? paraInputLocal(transacaoParaEditar.data) : obterDataHoraLocal(),
     // `cartaoForcado` (aberto a partir da aba "Compras" de um cartão específico): já
     // nasce com forma de pagamento e cartão resolvidos, sem opção de trocar — só
     // categoria/descrição/data/parcelas ficam por conta do usuário.

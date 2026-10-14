@@ -36,7 +36,11 @@ function HomeSkeleton() {
 // Hero + visibilidade do FAB, uma única origem via IntersectionObserver) e do fluxo
 // de nova transação — nenhum outro componente mexe nesse estado diretamente.
 const Home = ({
-  transacoes,
+  saldoFinanceiro,
+  entradas,
+  saidas,
+  resultadoMes,
+  transacoesRecentes: recentes,
   carregando,
   erroCarregamento,
   handleTransacaoSalva,
@@ -78,29 +82,8 @@ const Home = ({
     // `recolhido` no último valor.
   }, [carregando]);
 
-  const resumo = useMemo(() => {
-    const receitas = transacoes.filter((t) => t.tipo === 'receita').reduce((acc, t) => acc + t.valor, 0);
-    const despesas = transacoes.filter((t) => t.tipo === 'despesa').reduce((acc, t) => acc + t.valor, 0);
-
-    const mesAtual = new Date().toISOString().slice(0, 7);
-    const receitasDoMes = transacoes
-      .filter((t) => t.tipo === 'receita' && t.data.startsWith(mesAtual))
-      .reduce((acc, t) => acc + t.valor, 0);
-    const despesasDoMes = transacoes
-      .filter((t) => t.tipo === 'despesa' && t.data.startsWith(mesAtual))
-      .reduce((acc, t) => acc + t.valor, 0);
-
-    return {
-      receitas,
-      despesas,
-      saldo: receitas - despesas,
-      resultadoMes: receitasDoMes - despesasDoMes,
-    };
-  }, [transacoes]);
-
-  const recentes = useMemo(() => {
-    return [...transacoes].sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : 0)).slice(0, 5);
-  }, [transacoes]);
+  // Saldo, Entradas/Saídas (período do Hero), resultado do mês e "últimas realizadas"
+  // vêm prontos do hook (domínio) — Home só exibe, não calcula regra financeira.
 
   // Atalho de menor fricção no Hero: a meta ainda não concluída com maior progresso.
   // Uma meta já concluída (valorReservado >= valorAlvo) não é "a mais próxima de
@@ -146,10 +129,10 @@ const Home = ({
         sentinelRef={sentinelRef}
         recolhido={recolhido}
         modoRecorrentes={modoRecorrentes}
-        saldo={resumo.saldo}
-        receitas={resumo.receitas}
-        despesas={resumo.despesas}
-        variacaoMes={resumo.resultadoMes}
+        saldo={saldoFinanceiro}
+        receitas={entradas}
+        despesas={saidas}
+        variacaoMes={resultadoMes}
         dadosIndisponiveis={erroCarregamento}
         metaDestaque={metaDestaque}
         onAbrirMetaDestaque={onAbrirMetas}

@@ -13,6 +13,7 @@ import TransactionFlow from '../componentes/TransactionFlow.jsx';
 import InvoicePaymentDialog from '../componentes/InvoicePaymentDialog.jsx';
 import { adicionarMesesCompetencia, nomeFatura } from '../servicos/cartoes.js';
 import { gastosNoCartaoNoMes } from '../dominio/cartoes.js';
+import { paraTimestamp, compararPorTempoDesc } from '../dominio/tempo.js';
 
 const formatadorMoeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const brl = (centavos) => formatadorMoeda.format(centavos / 100);
@@ -115,7 +116,7 @@ const CartaoDetalhe = ({
   const faturaSelecionada = faturaPorCompetencia[competenciaSelecionada] ?? null;
   const pagamentosDaCompetencia = pagamentosFatura
     .filter((p) => p.cartaoId === cartaoId && p.competencia === competenciaSelecionada)
-    .sort((a, b) => (a.data < b.data ? 1 : -1));
+    .sort(compararPorTempoDesc);
 
   const abrirEditarCompraPorId = (compraId) => {
     const compra = comprasCartao.find((c) => c.id === compraId);
@@ -293,7 +294,7 @@ const CartaoDetalhe = ({
                   {pagamentosDaCompetencia.map((p) => (
                     <div key={p.id} className="flex items-center gap-3 py-2">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-foreground">{new Date(p.data).toLocaleDateString('pt-BR')}</p>
+                        <p className="text-sm text-foreground">{new Date(paraTimestamp(p.data)).toLocaleDateString('pt-BR')}</p>
                       </div>
                       <p className="text-sm font-semibold tabular-nums text-foreground">{formatadorMoeda.format(p.valor)}</p>
                       <IconButton aria-label="Editar pagamento" onClick={() => setPagamentoDialogo({ competencia: p.competencia, pagamento: p })}>
