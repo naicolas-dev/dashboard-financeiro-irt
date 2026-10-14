@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { collection, getDocs, doc, deleteDoc, addDoc, updateDoc, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, deleteDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { db } from '../firebase/configuracao';
 import { buscarPagamentosDeFatura, excluirCompraCartao, excluirComprasCartaoEmLote } from '../servicos/cartoes.js';
@@ -22,8 +22,38 @@ import {
   resultadoDoMesCentavos,
 } from '../dominio/caixa.js';
 import { paraTimestamp, compararPorTempoDesc, inicioDoDiaLocal, fimDoDiaLocal } from '../dominio/tempo.js';
+import {
+  ehLiquidacaoRecorrente,
+  idLiquidacao,
+  normalizarSerie,
+  agruparObrigacoes,
+  totaisPendentes,
+  inconsistenciasDeLiquidacao,
+  planejarEdicaoDaSerie,
+  planejarEncerramento,
+  planejarExclusaoDaSerie,
+  rotulosPorTipo,
+} from '../dominio/recorrencias.js';
+import * as servicoRecorrencias from '../servicos/recorrencias.js';
 
 const QUANTIDADE_DE_RECENTES = 5;
+
+const MOTIVOS_DE_RECUSA = {
+  inexistente: 'Esta conta não existe mais. Atualize a tela.',
+  ja_realizada: 'Esta conta já foi quitada (talvez em outra aba ou aparelho).',
+  cancelada: 'Esta conta está cancelada.',
+  nao_cancelada: 'Esta conta não está cancelada.',
+  valor_invalido: 'Informe um valor maior que zero.',
+  data_invalida: 'Data inválida.',
+  descricao_invalida: 'Informe uma descrição.',
+  categoria_invalida: 'Informe uma categoria.',
+  dia_invalido: 'O dia do mês deve estar entre 1 e 31.',
+  tipo_invalido: 'Tipo inválido.',
+  realizada_desfazer_antes: 'Esta conta já foi quitada. Desfaça o pagamento antes de alterá-la.',
+  nao_realizada: 'Esta conta ainda não foi quitada.',
+  sem_transacao: 'O registro do pagamento não foi encontrado. Use "Desfazer" para reconciliar.',
+  tem_realizadas: 'Esta recorrência já tem pagamentos registrados. Encerre-a em vez de excluir.',
+};
 
 // Toda ordenação de transações é por TEMPO REAL (dominio/tempo.js), nunca por string:
 // os documentos misturam 'YYYY-MM-DDTHH:mm' (hora local) e ISO com Z (UTC).
@@ -55,49 +85,6 @@ async function buscarTodasTransacoes() {
   return snapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
 }
 
-// Cria as transações do mês ainda não geradas para as regras recorrentes ativas,
-// reaproveitando a lista de regras já carregada (sem disparar uma segunda query).
-async function processarRecorrenciasDevidas(recorrencias) {
-  const hoje = new Date();
-  const novasTransacoes = [];
-  const recorrenciasAtualizadas = recorrencias.map((r) => ({ ...r }));
-
-  for (let i = 0; i < recorrenciasAtualizadas.length; i++) {
-    const regra = recorrenciasAtualizadas[i];
-    if (!regra.ativa) continue;
-
-    const ultimoRegistro = regra.ultimoRegistro ? regra.ultimoRegistro.toDate() : null;
-    let deveCriar = false;
-
-    if (!ultimoRegistro) {
-      if (hoje.getDate() >= regra.diaDoMes) deveCriar = true;
-    } else {
-      const noMesmoMes = hoje.getMonth() === ultimoRegistro.getMonth() && hoje.getFullYear() === ultimoRegistro.getFullYear();
-      if (!noMesmoMes && hoje.getDate() >= regra.diaDoMes) deveCriar = true;
-    }
-
-    if (!deveCriar) continue;
-
-    const dataDaTransacao = new Date(hoje.getFullYear(), hoje.getMonth(), regra.diaDoMes);
-    const novaTransacao = {
-      descricao: `${regra.descricao} (Recorrente)`,
-      valor: regra.valor,
-      tipo: regra.tipo,
-      categoria: regra.categoria,
-      data: dataDaTransacao.toISOString(),
-    };
-
-    const docRef = await addDoc(collection(db, 'transacoes'), novaTransacao);
-    const agora = new Date();
-    await updateDoc(doc(db, 'transacoesRecorrentes', regra.id), { ultimoRegistro: agora });
-
-    novasTransacoes.push({ id: docRef.id, ...novaTransacao });
-    recorrenciasAtualizadas[i] = { ...regra, ultimoRegistro: Timestamp.fromDate(agora) };
-  }
-
-  return { novasTransacoes, recorrenciasAtualizadas };
-}
-
 // Centraliza o estado e o acesso ao Firestore (transações, metas e recorrentes) que
 // antes vivia espalhado dentro de App.jsx. Os formulários continuam fazendo seus
 // próprios addDoc/updateDoc (não duplicamos essa camada), mas o carregamento inicial,
@@ -109,6 +96,10 @@ export function useDadosFinanceiros(usuario) {
   const [transacoesCarregadas, setTransacoes] = useState([]);
   const [metas, setMetas] = useState([]);
   const [recorrencias, setRecorrencias] = useState([]);
+  // Obrigações programadas (uma por série × mês). `ocorrenciasIndisponiveis` = a coleção não pôde
+  // ser lida (ex.: Rule ainda não publicada): séries continuam funcionando, só não há geração.
+  const [ocorrencias, setOcorrencias] = useState([]);
+  const [ocorrenciasIndisponiveis, setOcorrenciasIndisponiveis] = useState(false);
   const [cartoesBase, setCartoesBase] = useState([]);
   const [comprasCartao, setComprasCartao] = useState([]);
   const [pagamentosFatura, setPagamentosFatura] = useState([]);
@@ -125,13 +116,13 @@ export function useDadosFinanceiros(usuario) {
   const [filtroCategoria, setFiltroCategoria] = useState('todas');
   const [filtroTipo, setFiltroTipo] = useState('todos');
 
-  const recorrenciasProcessadas = useRef(false);
-
   useEffect(() => {
     if (!usuario) {
       setTransacoes([]);
       setMetas([]);
       setRecorrencias([]);
+      setOcorrencias([]);
+      setOcorrenciasIndisponiveis(false);
       setCartoesBase([]);
       setComprasCartao([]);
       setPagamentosFatura([]);
@@ -161,7 +152,7 @@ export function useDadosFinanceiros(usuario) {
       }
 
       try {
-        const [todasAsTransacoes, metasCarregadas, recorrenciasCarregadas, cartoesCarregados, comprasCartaoCarregadas, pagamentosCarregados] =
+        const [todasAsTransacoes, metasCarregadas, recorrenciasCarregadas, cartoesCarregados, comprasCartaoCarregadas, pagamentosCarregados, ocorrenciasLidas] =
           await Promise.all([
             buscarTodasTransacoes(),
             buscarTodos('metas'),
@@ -169,24 +160,32 @@ export function useDadosFinanceiros(usuario) {
             buscarTodos('cartoes'),
             buscarTodos('comprasCartao'),
             buscarPagamentosDeFatura(),
+            // Falha só nesta coleção (ex.: permission-denied antes de a Rule ser publicada) não
+            // derruba o app: `null` = indisponível, e nada é gerado em cima de leitura incerta.
+            buscarTodos('ocorrenciasRecorrentes').catch((erro) => {
+              console.warn('Não foi possível ler ocorrenciasRecorrentes:', erro?.code ?? erro);
+              return null;
+            }),
           ]);
 
-        let transacoesFinais = todasAsTransacoes;
-        let recorrenciasFinais = recorrenciasCarregadas;
-
-        if (!recorrenciasProcessadas.current) {
-          const resultado = await processarRecorrenciasDevidas(recorrenciasCarregadas);
-          if (resultado.novasTransacoes.length > 0) {
-            transacoesFinais = [...resultado.novasTransacoes, ...transacoesFinais];
+        // Gera as obrigações que faltam (idempotente, id determinístico) SÓ depois de ler tudo com
+        // sucesso. Falha aqui nunca bloqueia o carregamento: o próximo load tenta de novo.
+        let ocorrenciasFinais = ocorrenciasLidas ?? [];
+        if (ocorrenciasLidas !== null) {
+          try {
+            const criadas = await servicoRecorrencias.garantirOcorrencias({ series: recorrenciasCarregadas, ocorrencias: ocorrenciasLidas, agora: new Date() });
+            ocorrenciasFinais = [...ocorrenciasLidas, ...criadas];
+          } catch (erro) {
+            console.warn('Não foi possível gerar as ocorrências recorrentes:', erro);
           }
-          recorrenciasFinais = resultado.recorrenciasAtualizadas;
-          recorrenciasProcessadas.current = true;
         }
 
         if (!ativo) return;
-        setTransacoes(ordenarPorDataDesc(transacoesFinais));
+        setTransacoes(ordenarPorDataDesc(todasAsTransacoes));
         setMetas(metasCarregadas.map(normalizarMeta));
-        setRecorrencias(recorrenciasFinais);
+        setRecorrencias(recorrenciasCarregadas);
+        setOcorrencias(ocorrenciasFinais);
+        setOcorrenciasIndisponiveis(ocorrenciasLidas === null);
         setCartoesBase(cartoesCarregados);
         setComprasCartao(comprasCartaoCarregadas);
         setPagamentosFatura(pagamentosCarregados);
@@ -276,10 +275,318 @@ export function useDadosFinanceiros(usuario) {
     });
   }, []);
 
+  // ------------------------------------------------------------------------------------------
+  // Programadas = obrigações recorrentes. Uma ocorrência é uma OBRIGAÇÃO: nunca toca o saldo.
+  // Só a liquidação (transação `liq_<ocorrenciaId>`, natureza `liquidacao_recorrente`) entra no
+  // caixa, e liquidar/desfazer são atômicos no banco (servicos/recorrencias.js).
+  // ------------------------------------------------------------------------------------------
+  const guardarOcorrencia = useCallback((atualizada) => {
+    setOcorrencias((prev) => (prev.some((o) => o.id === atualizada.id) ? prev.map((o) => (o.id === atualizada.id ? atualizada : o)) : [...prev, atualizada]));
+  }, []);
+
+  const guardarLiquidacao = useCallback((transacao) => {
+    setTransacoes((prev) => ordenarPorDataDesc([...prev.filter((t) => t.id !== transacao.id), transacao]));
+  }, []);
+
+  // Executa uma ação de serviço: recusa do domínio vira toast claro; erro de rede/permissão também.
+  const executarAcao = useCallback(
+    async (acao) => {
+      try {
+        const resultado = await acao();
+        if (!resultado.ok) {
+          toast.error(MOTIVOS_DE_RECUSA[resultado.motivo] ?? 'Não foi possível concluir a ação.');
+          return null;
+        }
+        if (resultado.ocorrencia) guardarOcorrencia(resultado.ocorrencia);
+        return resultado;
+      } catch (erro) {
+        console.error('Erro em ação de recorrência:', erro);
+        toast.error('Não foi possível concluir. Tente novamente.');
+        return null;
+      }
+    },
+    [guardarOcorrencia]
+  );
+
+  const liquidarObrigacao = useCallback(
+    async (ocorrencia, { valor, data }) => {
+      const resultado = await executarAcao(() => servicoRecorrencias.liquidarOcorrencia({ ocorrenciaId: ocorrencia.id, valor, data }));
+      if (!resultado) return false;
+      if (resultado.transacao) guardarLiquidacao(resultado.transacao);
+      toast.success(ocorrencia.tipo === 'receita' ? 'Recebimento registrado' : 'Pagamento registrado');
+      if (resultado.reconciliada) toast.info('Já existia um registro desta quitação; a obrigação foi vinculada a ele.');
+      return true;
+    },
+    [executarAcao, guardarLiquidacao]
+  );
+
+  const corrigirObrigacao = useCallback(
+    async (ocorrencia, { valor, data }) => {
+      const resultado = await executarAcao(() => servicoRecorrencias.corrigirLiquidacao({ ocorrenciaId: ocorrencia.id, valor, data }));
+      if (!resultado) return false;
+      if (resultado.transacao) guardarLiquidacao(resultado.transacao);
+      toast.success(ocorrencia.tipo === 'receita' ? 'Recebimento atualizado' : 'Pagamento atualizado');
+      return true;
+    },
+    [executarAcao, guardarLiquidacao]
+  );
+
+  // Desfazer tem confirmação explícita: o valor volta ao saldo e a obrigação volta a pendente.
+  const desfazerObrigacao = useCallback(
+    (ocorrencia) => {
+      const { desfazer, verbo } = rotulosPorTipo(ocorrencia.tipo);
+      return confirmarExclusao({
+        titulo: `${desfazer}?`,
+        descricao: `O ${verbo} sai das movimentações, o saldo é ajustado e a obrigação volta a ficar pendente.`,
+        textoConfirmar: desfazer,
+        acao: async () => {
+          const resultado = await executarAcao(() => servicoRecorrencias.desfazerLiquidacao({ ocorrenciaId: ocorrencia.id }));
+          if (!resultado) return false;
+          if (resultado.nada) {
+            toast.info('Esta obrigação já estava pendente. Atualize a tela se algo parecer diferente.');
+            return true;
+          }
+          setTransacoes((prev) => prev.filter((t) => t.id !== idLiquidacao(ocorrencia.id)));
+          toast.success(ocorrencia.tipo === 'receita' ? 'Recebimento desfeito' : 'Pagamento desfeito');
+          if (resultado.reconciliada) toast.warning('Os registros estavam inconsistentes e foram reconciliados.');
+          return true;
+        },
+      });
+    },
+    [confirmarExclusao, executarAcao]
+  );
+
+  const adiarObrigacao = useCallback(
+    async (ocorrencia, novoVencimento) => {
+      const resultado = await executarAcao(() => servicoRecorrencias.adiarOcorrencia({ ocorrenciaId: ocorrencia.id, novoVencimento }));
+      if (resultado) toast.success('Vencimento alterado só desta conta');
+      return Boolean(resultado);
+    },
+    [executarAcao]
+  );
+
+  const editarObrigacao = useCallback(
+    async (ocorrencia, campos) => {
+      const resultado = await executarAcao(() => servicoRecorrencias.editarOcorrencia({ ocorrenciaId: ocorrencia.id, campos }));
+      if (resultado) toast.success('Conta atualizada (só esta)');
+      return Boolean(resultado);
+    },
+    [executarAcao]
+  );
+
+  const cancelarObrigacao = useCallback(
+    (ocorrencia) =>
+      confirmarExclusao({
+        titulo: 'Cancelar esta conta?',
+        descricao: 'Só esta ocorrência é cancelada. A recorrência continua e as próximas contas não mudam. Você pode restaurá-la depois.',
+        textoConfirmar: 'Cancelar conta',
+        acao: async () => {
+          const resultado = await executarAcao(() => servicoRecorrencias.cancelarOcorrencia({ ocorrenciaId: ocorrencia.id }));
+          if (resultado) toast.success('Conta cancelada');
+          return Boolean(resultado);
+        },
+      }),
+    [confirmarExclusao, executarAcao]
+  );
+
+  const restaurarObrigacao = useCallback(
+    async (ocorrencia) => {
+      const resultado = await executarAcao(() => servicoRecorrencias.restaurarOcorrencia({ ocorrenciaId: ocorrencia.id }));
+      if (resultado) toast.success('Conta restaurada');
+      return Boolean(resultado);
+    },
+    [executarAcao]
+  );
+
+  // Séries ----------------------------------------------------------------------------------
+  const guardarSerie = useCallback((serie) => {
+    setRecorrencias((prev) => (prev.some((r) => r.id === serie.id) ? prev.map((r) => (r.id === serie.id ? { ...r, ...serie } : r)) : [...prev, serie]));
+  }, []);
+
+  // Cria a série e já materializa as contas do horizonte (a primeira vence a partir de hoje).
+  const criarSerieRecorrente = useCallback(
+    async (dados) => {
+      try {
+        const agora = new Date();
+        const serie = await servicoRecorrencias.criarRecorrencia(dados, agora);
+        guardarSerie(serie);
+        if (!ocorrenciasIndisponiveis) {
+          try {
+            const criadas = await servicoRecorrencias.garantirOcorrencias({ series: [serie], ocorrencias: [], agora });
+            setOcorrencias((prev) => [...prev, ...criadas.filter((c) => !prev.some((o) => o.id === c.id))]);
+          } catch (erro) {
+            console.warn('Série criada, mas as contas não puderam ser geradas agora:', erro);
+            toast.warning('Recorrência criada. As contas aparecem na próxima vez que você abrir o app.');
+          }
+        }
+        toast.success(dados.tipo === 'receita' ? 'Receita recorrente criada!' : 'Despesa recorrente criada!');
+        return true;
+      } catch (erro) {
+        console.error('Erro ao criar recorrência:', erro);
+        toast.error('Não foi possível salvar. Tente novamente.');
+        return false;
+      }
+    },
+    [guardarSerie, ocorrenciasIndisponiveis]
+  );
+
+  // Editar a série: confirma mostrando QUANTAS contas pendentes serão atualizadas. Pagas, atrasadas e
+  // campos alterados só em uma conta ficam como estão.
+  const editarSerieRecorrente = useCallback(
+    async (serie, campos) => {
+      const serieAntiga = normalizarSerie(serie);
+      const { contagem } = planejarEdicaoDaSerie({ serieAntiga, serieNova: { ...serieAntiga, ...campos }, ocorrencias, agora: new Date() });
+
+      const aplicar = async () => {
+        try {
+          const resultado = await servicoRecorrencias.editarSerie({ serieId: serie.id, campos });
+          if (!resultado.ok) {
+            toast.error(MOTIVOS_DE_RECUSA[resultado.motivo] ?? 'Não foi possível salvar.');
+            return false;
+          }
+          guardarSerie({ ...resultado.serie, id: serie.id });
+          const porId = new Map(resultado.patches.map((p) => [p.id, p.campos]));
+          setOcorrencias((prev) => prev.map((o) => (porId.has(o.id) ? { ...o, ...porId.get(o.id) } : o)));
+          toast.success('Recorrência atualizada!');
+          return true;
+        } catch (erro) {
+          console.error('Erro ao atualizar recorrência:', erro);
+          toast.error('Não foi possível salvar. Tente novamente.');
+          return false;
+        }
+      };
+
+      if (contagem === 0) return aplicar();
+      return confirmarExclusao({
+        titulo: 'Atualizar a recorrência?',
+        descricao: `${contagem === 1 ? '1 conta pendente que ainda não venceu vai' : `${contagem} contas pendentes que ainda não venceram vão`} receber a mudança. Contas pagas, atrasadas ou alteradas só nelas não mudam.`,
+        textoConfirmar: 'Atualizar',
+        acao: aplicar,
+      });
+    },
+    [ocorrencias, confirmarExclusao, guardarSerie]
+  );
+
+  const encerrarSerieRecorrente = useCallback(
+    (serie) => {
+      const plano = planejarEncerramento({ serie: normalizarSerie(serie), ocorrencias, agora: new Date() });
+      const n = plano.cancelarIds.length;
+      const efeito = n === 0 ? 'Nenhuma conta futura será cancelada.' : n === 1 ? '1 conta futura pendente será cancelada.' : `${n} contas futuras pendentes serão canceladas.`;
+      return confirmarExclusao({
+        titulo: 'Encerrar a recorrência?',
+        descricao: `${efeito} O histórico (contas pagas e atrasadas) é mantido e nada novo será gerado.`,
+        textoConfirmar: 'Encerrar',
+        acao: async () => {
+          try {
+            const resultado = await servicoRecorrencias.encerrarSerie({ serieId: serie.id });
+            if (!resultado.ok) {
+              toast.error(MOTIVOS_DE_RECUSA[resultado.motivo] ?? 'Não foi possível encerrar.');
+              return false;
+            }
+            guardarSerie({ ...resultado.serie, id: serie.id });
+            const canceladas = new Set(resultado.cancelarIds);
+            setOcorrencias((prev) => prev.map((o) => (canceladas.has(o.id) ? { ...o, status: 'cancelada' } : o)));
+            toast.success('Recorrência encerrada');
+            return true;
+          } catch (erro) {
+            console.error('Erro ao encerrar recorrência:', erro);
+            toast.error('Não foi possível encerrar. Tente novamente.');
+            return false;
+          }
+        },
+      });
+    },
+    [ocorrencias, confirmarExclusao, guardarSerie]
+  );
+
+  const podeExcluirSerieRecorrente = useCallback((serie) => planejarExclusaoDaSerie({ serie, ocorrencias }).ok, [ocorrencias]);
+
+  const excluirSerieRecorrente = useCallback(
+    (serie) => {
+      if (!planejarExclusaoDaSerie({ serie, ocorrencias }).ok) {
+        toast.error(MOTIVOS_DE_RECUSA.tem_realizadas);
+        return false;
+      }
+      return confirmarExclusao({
+        titulo: 'Excluir recorrência?',
+        descricao: 'A recorrência e as contas pendentes ou canceladas dela serão removidas. Nenhum pagamento foi registrado nela.',
+        acao: async () => {
+          try {
+            const resultado = await servicoRecorrencias.excluirSerie({ serieId: serie.id });
+            if (!resultado.ok) {
+              toast.error(MOTIVOS_DE_RECUSA[resultado.motivo] ?? 'Não foi possível excluir.');
+              return false;
+            }
+            setRecorrencias((prev) => prev.filter((r) => r.id !== serie.id));
+            setOcorrencias((prev) => prev.filter((o) => o.serieId !== serie.id));
+            toast.success('Recorrência removida');
+            return true;
+          } catch (erro) {
+            console.error('Erro ao excluir recorrência:', erro);
+            toast.error('Não foi possível remover a recorrência.');
+            return false;
+          }
+        },
+      });
+    },
+    [ocorrencias, confirmarExclusao]
+  );
+
+  // Movimentações: a transação de liquidação aponta para a obrigação dela.
+  const ocorrenciaDaTransacao = useCallback((transacao) => ocorrencias.find((o) => o.id === transacao?.ocorrenciaId) ?? null, [ocorrencias]);
+
+  // Derivados da aba Programadas: grupos pelo relógio (atrasada/vence hoje/próxima), totais e
+  // consistência entre obrigações e liquidações.
+  const programadas = useMemo(() => {
+    const agora = new Date();
+    const liquidacoesPorId = Object.fromEntries(transacoesCarregadas.filter(ehLiquidacaoRecorrente).map((t) => [t.id, t]));
+    return {
+      agora,
+      ocorrencias,
+      grupos: agruparObrigacoes(ocorrencias, agora, { liquidacoesPorId }),
+      totais: totaisPendentes(ocorrencias),
+      liquidacoesPorId,
+      indisponivel: ocorrenciasIndisponiveis,
+      inconsistencias: ocorrenciasIndisponiveis ? null : inconsistenciasDeLiquidacao({ ocorrencias, transacoes: transacoesCarregadas }),
+    };
+  }, [ocorrencias, transacoesCarregadas, ocorrenciasIndisponiveis]);
+
+  // Dado inconsistente nunca é corrigido em silêncio: avisa uma vez e o usuário reconcilia pelo
+  // "Desfazer" da própria obrigação.
+  const inconsistenciasAvisadas = useRef(false);
+  useEffect(() => {
+    const inc = programadas.inconsistencias;
+    if (!inc?.temProblemas || inconsistenciasAvisadas.current) return;
+    inconsistenciasAvisadas.current = true;
+    console.warn('Recorrentes: registros inconsistentes', {
+      realizadaSemTransacao: inc.realizadaSemTransacao.map((o) => o.id),
+      transacaoSemOcorrencia: inc.transacaoSemOcorrencia.map((t) => t.id),
+    });
+    toast.warning('Há contas recorrentes com registros inconsistentes. Abra a conta em Programadas e use "Desfazer" para reconciliar.', { duration: 9000 });
+  }, [programadas.inconsistencias]);
+
+  const seriesRecorrentes = useMemo(() => recorrencias.map(normalizarSerie), [recorrencias]);
+
+  // Liquidação de recorrente NUNCA é apagada como transação comum (deixaria a obrigação "realizada"
+  // sem pagamento): exclui = desfazer a quitação, atomicamente.
+  const excluirLiquidacaoRecorrente = useCallback(
+    (transacao) => {
+      const ocorrencia = ocorrencias.find((o) => o.id === transacao.ocorrenciaId);
+      if (!ocorrencia) {
+        toast.error('Não foi possível localizar a conta recorrente deste lançamento. Atualize a tela e tente de novo.');
+        return false;
+      }
+      return desfazerObrigacao(ocorrencia);
+    },
+    [ocorrencias, desfazerObrigacao]
+  );
+
   // Pagamento de fatura também é uma transação (a saída de caixa real): excluir
   // devolve o valor ao saldo e a dívida volta a aparecer — tudo por derivação.
   const excluirTransacao = useCallback(
     (id) => {
+      const alvo = transacoesCarregadas.find((t) => t.id === id);
+      if (ehLiquidacaoRecorrente(alvo)) return excluirLiquidacaoRecorrente(alvo);
       const ehPagamento = pagamentosFatura.some((p) => p.id === id);
       return confirmarExclusao({
         titulo: ehPagamento ? 'Excluir pagamento de fatura?' : 'Excluir transação?',
@@ -301,7 +608,7 @@ export function useDadosFinanceiros(usuario) {
         },
       });
     },
-    [confirmarExclusao, pagamentosFatura]
+    [confirmarExclusao, pagamentosFatura, transacoesCarregadas, excluirLiquidacaoRecorrente]
   );
 
   const handleMetaAtualizada = useCallback((metaAtualizada) => {
@@ -382,41 +689,6 @@ export function useDadosFinanceiros(usuario) {
   const totalReservadoMetas = useMemo(() => metas.reduce((acc, m) => acc + (m.valorReservado || 0), 0), [metas]);
 
   const saldoDisponivel = calcularSaldoDisponivelCentavos(caixa.saldoCentavos, Math.round(totalReservadoMetas * 100)) / 100;
-
-  const handleRecorrenciaSalva = useCallback((recorrenciaSalva) => {
-    setRecorrencias((prev) => {
-      const existe = prev.some((r) => r.id === recorrenciaSalva.id);
-      return existe ? prev.map((r) => (r.id === recorrenciaSalva.id ? recorrenciaSalva : r)) : [...prev, recorrenciaSalva];
-    });
-  }, []);
-
-  const handleRecorrenciaExcluida = useCallback((id) => {
-    setRecorrencias((prev) => prev.filter((r) => r.id !== id));
-  }, []);
-
-  // Mesmo padrão de `excluirTransacao`: confirmação + delete + sincroniza o estado
-  // local + toast, tudo centralizado aqui (antes essa lógica vivia duplicada dentro
-  // de PainelRecorrentes.jsx).
-  const excluirRecorrencia = useCallback(
-    (id) =>
-      confirmarExclusao({
-        titulo: 'Excluir recorrência?',
-        descricao: 'Esta recorrência será removida permanentemente.',
-        acao: async () => {
-          try {
-            await deleteDoc(doc(db, 'transacoesRecorrentes', id));
-            setRecorrencias((prev) => prev.filter((r) => r.id !== id));
-            toast.success('Recorrência removida');
-            return true;
-          } catch (erro) {
-            console.error('Erro ao excluir recorrência:', erro);
-            toast.error('Não foi possível remover a regra.');
-            return false;
-          }
-        },
-      }),
-    [confirmarExclusao]
-  );
 
   // Parcelas são DERIVADAS das compras (nada gravado em `transacoes`). Mesmo formato
   // que a UI já consumia (valor em reais, competência, parcelaAtual/totalParcelas).
@@ -618,7 +890,6 @@ export function useDadosFinanceiros(usuario) {
   return {
     transacoes,
     metas,
-    recorrencias,
     cartoes,
     comprasCartao,
     parcelasCartao,
@@ -646,9 +917,23 @@ export function useDadosFinanceiros(usuario) {
     regrasCompra,
     validarAlteracaoCompras,
     contextoPagamento,
-    handleRecorrenciaSalva,
-    handleRecorrenciaExcluida,
-    excluirRecorrencia,
+    recorrencias: seriesRecorrentes,
+    programadas,
+    acoesProgramadas: {
+      liquidar: liquidarObrigacao,
+      corrigir: corrigirObrigacao,
+      desfazer: desfazerObrigacao,
+      adiar: adiarObrigacao,
+      editar: editarObrigacao,
+      cancelar: cancelarObrigacao,
+      restaurar: restaurarObrigacao,
+    },
+    ocorrenciaDaTransacao,
+    criarSerieRecorrente,
+    editarSerieRecorrente,
+    encerrarSerieRecorrente,
+    excluirSerieRecorrente,
+    podeExcluirSerieRecorrente,
     handleCartaoSalvo,
     handleCompraCriada,
     excluirCartao,

@@ -12,6 +12,11 @@ import {
   inicioDoDiaLocal,
   fimDoDiaLocal,
   inicioDoDiaHaMeses,
+  ehCompetenciaValida,
+  ultimoDiaDoMes,
+  somarMesesCompetencia,
+  dataNoMes,
+  paraDataISO,
 } from './tempo.js';
 
 const local = (a, m, d, h = 0, min = 0, s = 0, ms = 0) => new Date(a, m - 1, d, h, min, s, ms).getTime();
@@ -135,5 +140,39 @@ describe('derivados de tempo', () => {
 
   test('inicioDoDiaHaMeses: 12 meses atrás às 00:00 local', () => {
     assert.equal(inicioDoDiaHaMeses(new Date(2026, 9, 14, 17, 45), 12), local(2025, 10, 14));
+  });
+});
+
+describe('competência e vencimentos', () => {
+  test('ehCompetenciaValida', () => {
+    assert.equal(ehCompetenciaValida('2026-10'), true);
+    for (const x of ['2026-13', '2026-00', '2026-1', '26-10', '2026-10-01', null, 202610]) assert.equal(ehCompetenciaValida(x), false);
+  });
+
+  test('ultimoDiaDoMes respeita bissexto', () => {
+    assert.equal(ultimoDiaDoMes(2026, 1), 28);
+    assert.equal(ultimoDiaDoMes(2028, 1), 29);
+    assert.equal(ultimoDiaDoMes(2026, 3), 30);
+    assert.equal(ultimoDiaDoMes(2026, 11), 31);
+  });
+
+  test('somarMesesCompetencia atravessa o ano nos dois sentidos', () => {
+    assert.equal(somarMesesCompetencia('2026-11', 2), '2027-01');
+    assert.equal(somarMesesCompetencia('2026-01', -1), '2025-12');
+    assert.equal(somarMesesCompetencia('2026-05', 0), '2026-05');
+    assert.equal(somarMesesCompetencia('2026-01', 25), '2028-02');
+  });
+
+  test('dataNoMes ajusta dia 29/30/31 ao último dia do mês', () => {
+    assert.equal(dataNoMes('2026-02', 31), '2026-02-28');
+    assert.equal(dataNoMes('2024-02', 31), '2024-02-29');
+    assert.equal(dataNoMes('2026-04', 31), '2026-04-30');
+    assert.equal(dataNoMes('2026-10', 14), '2026-10-14');
+  });
+
+  test('paraDataISO usa o dia LOCAL', () => {
+    assert.equal(paraDataISO('2026-10-14T23:30'), '2026-10-14');
+    assert.equal(paraDataISO(new Date(2026, 9, 14, 0, 5)), '2026-10-14');
+    assert.equal(paraDataISO('lixo'), '');
   });
 });

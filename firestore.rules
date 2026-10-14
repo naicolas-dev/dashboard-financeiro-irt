@@ -19,6 +19,12 @@ service cloud.firestore {
       allow read, write: if ehProprietario();
     }
 
+    // Obrigações programadas (uma por recorrência × mês). Mesmo contrato das demais coleções:
+    // dono único, sem userId/resource.data, leitura da coleção inteira (sem where).
+    match /ocorrenciasRecorrentes/{id} {
+      allow read, write: if ehProprietario();
+    }
+
     match /cartoes/{id} {
       allow read, write: if ehProprietario();
     }

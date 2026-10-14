@@ -4,6 +4,9 @@ import Button from './ui/Button';
 import SelectField from './ui/SelectField';
 import ComboboxField from './ui/ComboboxField';
 import { CATEGORIAS_TRANSACAO } from '../constantes/categorias.js';
+import { primeiraCompetenciaPadrao } from '../dominio/recorrencias.js';
+import { dataNoMes } from '../dominio/tempo.js';
+import { formatarDataNumerica } from '../utils/datas.js';
 
 const formatadorMoeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -33,10 +36,16 @@ const RecurrenceDetails = ({
   modoEdicao = false,
   excluindo = false,
   onExcluir,
+  encerrada = false,
+  encerrando = false,
+  onEncerrar,
 }) => {
   const valorNumerico = Number(valorCentavos || '0') / 100;
   const diaValido = Number(diaDoMes) >= 1 && Number(diaDoMes) <= 31;
   const podeSalvar = categoria !== '' && descricao.trim() !== '' && diaValido && (!modoEdicao || valorNumerico > 0) && !salvando;
+
+  // Na criação: quando vence a primeira conta (primeiro vencimento a partir de hoje).
+  const primeiroVencimento = diaValido && !modoEdicao ? dataNoMes(primeiraCompetenciaPadrao(Number(diaDoMes), new Date()), diaDoMes) : null;
 
   const handleValorChange = (e) => {
     const digitos = e.target.value.replace(/\D/g, '');
@@ -89,9 +98,27 @@ const RecurrenceDetails = ({
         onChange={(e) => setDiaDoMes(e.target.value)}
       />
 
+      {primeiroVencimento && (
+        <p className="text-xs text-foreground-muted">
+          A primeira conta vence em {formatarDataNumerica(primeiroVencimento)}. Dia 29, 30 ou 31 vale o último dia dos meses mais curtos.
+        </p>
+      )}
+
+      <p className="text-xs text-foreground-muted">
+        {tipo === 'receita'
+          ? 'Não recebe sozinha: cada mês vira uma conta em Programadas e só entra no saldo quando você marcar como recebida.'
+          : 'Não debita sozinha: cada mês vira uma conta em Programadas e só sai do saldo quando você marcar como paga.'}
+      </p>
+
       <Button size="lg" className="w-full" disabled={!podeSalvar} carregando={salvando} onClick={onSalvar}>
         {modoEdicao ? 'Salvar alterações' : 'Salvar'}
       </Button>
+
+      {modoEdicao && onEncerrar && !encerrada && (
+        <Button variant="secondary" size="lg" className="w-full" carregando={encerrando} onClick={onEncerrar}>
+          Encerrar recorrência
+        </Button>
+      )}
 
       {modoEdicao && onExcluir && (
         <Button variant="destructive" size="lg" className="w-full" carregando={excluindo} onClick={onExcluir}>

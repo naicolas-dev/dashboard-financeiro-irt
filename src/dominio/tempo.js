@@ -113,3 +113,35 @@ export function inicioDoDiaHaMeses(agora, meses) {
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 }
+
+// ---------------------------------------------------------------- competência (mês) e vencimentos
+// Competência = 'YYYY-MM'. Comparar duas competências por string é seguro (formato fixo
+// zero-padded); comparar DATAS por string continua proibido.
+
+export const ehCompetenciaValida = (c) => typeof c === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(c);
+
+export function ultimoDiaDoMes(ano, mesIndex) {
+  return new Date(ano, mesIndex + 1, 0).getDate();
+}
+
+export function somarMesesCompetencia(competencia, meses) {
+  const [ano, mes] = competencia.split('-').map(Number);
+  const d = new Date(ano, mes - 1 + meses, 1);
+  return `${d.getFullYear()}-${dois(d.getMonth() + 1)}`;
+}
+
+// 'YYYY-MM-DD' (data pura, local) do dia `dia` da competência, ajustado ao último dia do
+// mês quando ele não existe (31 em fevereiro = 28/29; 31 em abril = 30).
+export function dataNoMes(competencia, dia) {
+  const [ano, mes] = competencia.split('-').map(Number);
+  const efetivo = Math.min(Number(dia), ultimoDiaDoMes(ano, mes - 1));
+  return `${ano}-${dois(mes)}-${dois(efetivo)}`;
+}
+
+// Data pura 'YYYY-MM-DD' do dia LOCAL de qualquer instante interpretável.
+export function paraDataISO(valor) {
+  const t = paraTimestamp(valor);
+  if (!Number.isFinite(t)) return '';
+  const d = new Date(t);
+  return `${d.getFullYear()}-${dois(d.getMonth() + 1)}-${dois(d.getDate())}`;
+}

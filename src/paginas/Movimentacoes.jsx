@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { MagnifyingGlassIcon, XMarkIcon, InboxIcon, ArrowPathIcon, SignalSlashIcon } from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, XMarkIcon, InboxIcon, SignalSlashIcon } from '@heroicons/react/24/outline';
 import TransactionRow from '../componentes/TransactionRow.jsx';
-import RecurrenceRow from '../componentes/RecurrenceRow.jsx';
+import ObligationActions from '../componentes/ObligationActions.jsx';
 import ResponsiveDialog from '../componentes/ui/ResponsiveDialog.jsx';
 import TransactionFlow from '../componentes/TransactionFlow.jsx';
-import RecurrenceFlow from '../componentes/RecurrenceFlow.jsx';
 import InvoicePaymentDialog from '../componentes/InvoicePaymentDialog.jsx';
 import { ehPagamentoDeFatura } from '../dominio/cartoes.js';
+import { ehLiquidacaoRecorrente } from '../dominio/recorrencias.js';
 import EmptyState from '../componentes/ui/EmptyState.jsx';
 import Skeleton from '../componentes/ui/Skeleton.jsx';
 import ComboboxField from '../componentes/ui/ComboboxField.jsx';
@@ -17,7 +17,6 @@ const OPCOES_TIPO_FILTRO = [
   { valor: 'todos', texto: 'Receitas e despesas' },
   { valor: 'receita', texto: 'Só receitas' },
   { valor: 'despesa', texto: 'Só despesas' },
-  { valor: 'recorrentes', texto: 'Recorrentes' },
 ];
 
 const PRESETS_PERIODO = [
@@ -41,9 +40,10 @@ function HistoricoSkeleton() {
 // linha tem botões de editar/excluir explícitos (TransactionRow com onEditar/onExcluir)
 // — editar abre o TransactionFlow em modo edição (tela única, sem passar pelo teclado
 // numérico); excluir vai direto, sem abrir nada (confirmação já embutida em
-// `excluirTransacao`). "Recorrentes" é mais uma opção do filtro de tipo (mesma ideia
-// do switcher da Home): ao selecionar, a lista troca para as regras recorrentes —
-// criação continua só pela Home, aqui só dá pra editar/excluir.
+// `excluirTransacao`). Aqui só existe LIVRO-CAIXA: o que já aconteceu. Contas a pagar/receber
+// (recorrências) moram em Home → Programadas; a quitação de uma delas aparece aqui como uma
+// movimentação normal, mas editar/excluir leva ao fluxo da própria conta (nunca à edição
+// genérica, que deixaria a conta "paga" sem pagamento).
 const Movimentacoes = ({
   transacoes,
   transacoesFiltradas,
@@ -54,9 +54,9 @@ const Movimentacoes = ({
   erroCarregamento,
   excluirTransacao,
   handleTransacaoSalva,
-  recorrencias,
-  handleRecorrenciaSalva,
-  excluirRecorrencia,
+  acoesProgramadas,
+  ocorrenciaDaTransacao,
+  programadas,
   cartoes,
   saldoFinanceiro,
   saldoDisponivel,
@@ -70,16 +70,19 @@ const Movimentacoes = ({
   const [presetAtivo, setPresetAtivo] = useState(null);
   const [transacaoEditando, setTransacaoEditando] = useState(null);
   const [pagamentoEditando, setPagamentoEditando] = useState(null);
-  const [recorrenciaEditando, setRecorrenciaEditando] = useState(null);
+  const [liquidacaoEditando, setLiquidacaoEditando] = useState(null);
 
   // Pagamento de fatura não passa pelo fluxo genérico (não pode virar receita nem
   // trocar de categoria) — abre o diálogo próprio, com as regras do cartão.
-  const editar = (t) => (ehPagamentoDeFatura(t) ? setPagamentoEditando(t) : setTransacaoEditando(t));
+  const editar = (t) => {
+    if (ehPagamentoDeFatura(t)) setPagamentoEditando(t);
+    else if (ehLiquidacaoRecorrente(t)) setLiquidacaoEditando(t);
+    else setTransacaoEditando(t);
+  };
+  const ocorrenciaEditando = liquidacaoEditando ? ocorrenciaDaTransacao(liquidacaoEditando) : null;
   const contextoPagamentoEditando =
     pagamentoEditando &&
     contextoPagamento({ cartaoId: pagamentoEditando.cartaoId, competencia: pagamentoEditando.competencia, ignorarPagamentoId: pagamentoEditando.id });
-
-  const modoRecorrentes = filtroTipo === 'recorrentes';
 
   const categorias = useMemo(() => {
     const unicas = new Set();
@@ -108,15 +111,6 @@ const Movimentacoes = ({
     }
     return [...porData.entries()];
   }, [transacoesFiltradas, busca]);
-
-  const recorrenciasFiltradas = useMemo(() => {
-    const buscaLower = busca.trim().toLowerCase();
-    return recorrencias.filter((r) => {
-      const passaCategoria = filtroCategoria === 'todas' || r.categoria === filtroCategoria;
-      const passaBusca = !buscaLower || r.descricao.toLowerCase().includes(buscaLower) || r.categoria.toLowerCase().includes(buscaLower);
-      return passaCategoria && passaBusca;
-    });
-  }, [recorrencias, filtroCategoria, busca]);
 
   const temFiltroAtivo = Boolean(dataInicio || dataFim || filtroCategoria !== 'todas' || filtroTipo !== 'todos' || busca.trim());
 
@@ -176,8 +170,7 @@ const Movimentacoes = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {!modoRecorrentes &&
-            PRESETS_PERIODO.map((preset) => (
+          {PRESETS_PERIODO.map((preset) => (
               <button
                 key={preset.id}
                 type="button"
@@ -190,7 +183,7 @@ const Movimentacoes = ({
               >
                 {preset.texto}
               </button>
-            ))}
+          ))}
           {temFiltroAtivo && (
             <button
               type="button"
@@ -218,32 +211,6 @@ const Movimentacoes = ({
       <section className="space-y-4">
         {carregando ? (
           <HistoricoSkeleton />
-        ) : modoRecorrentes ? (
-          recorrenciasFiltradas.length === 0 ? (
-            erroCarregamento ? (
-              <EmptyState icone={SignalSlashIcon} titulo="Sem conexão" descricao="Não foi possível carregar as recorrências." />
-            ) : (
-              <EmptyState
-                icone={ArrowPathIcon}
-                titulo="Nenhuma recorrência encontrada"
-                descricao="Ajuste a busca/categoria, ou crie uma recorrência pela tela inicial."
-              />
-            )
-          ) : (
-            <div className="rounded-2xl border border-border bg-surface-raised p-2 divide-y divide-border">
-              {recorrenciasFiltradas.map((r) => (
-                <RecurrenceRow
-                  key={r.id}
-                  descricao={r.descricao}
-                  valor={r.valor}
-                  tipo={r.tipo}
-                  diaDoMes={r.diaDoMes}
-                  onEditar={() => setRecorrenciaEditando(r)}
-                  onExcluir={() => excluirRecorrencia(r.id)}
-                />
-              ))}
-            </div>
-          )
         ) : grupos.length === 0 ? (
           erroCarregamento ? (
             <EmptyState icone={SignalSlashIcon} titulo="Sem conexão" descricao="Não foi possível carregar as transações." />
@@ -306,13 +273,16 @@ const Movimentacoes = ({
         )}
       </ResponsiveDialog>
 
-      <ResponsiveDialog aberto={!!recorrenciaEditando} aoFechar={() => setRecorrenciaEditando(null)}>
-        {recorrenciaEditando && (
-          <RecurrenceFlow
-            recorrenciaParaEditar={recorrenciaEditando}
-            onFechar={() => setRecorrenciaEditando(null)}
-            onRecorrenciaSalva={handleRecorrenciaSalva}
-            aoExcluir={excluirRecorrencia}
+      <ResponsiveDialog aberto={!!liquidacaoEditando} aoFechar={() => setLiquidacaoEditando(null)}>
+        {liquidacaoEditando && ocorrenciaEditando && (
+          <ObligationActions
+            key={ocorrenciaEditando.id}
+            ocorrencia={ocorrenciaEditando}
+            agora={programadas.agora}
+            liquidacao={liquidacaoEditando}
+            acoes={acoesProgramadas}
+            modoInicial="corrigir"
+            onFechar={() => setLiquidacaoEditando(null)}
           />
         )}
       </ResponsiveDialog>

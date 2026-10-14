@@ -2,13 +2,15 @@ import React, { useState } from 'react';
 import { toast } from 'sonner';
 import AmountKeypad from './AmountKeypad';
 import RecurrenceDetails from './RecurrenceDetails';
-import { criarRecorrencia, atualizarRecorrencia } from '../servicos/recorrencias.js';
 
 // Mesmo padrão do TransactionFlow: teclado numérico → tela única de detalhes.
 // Criação sempre chega com `tipoInicial` já definido (Home resolve isso com os
 // botões Receita/Despesa) — não existe etapa de "escolher tipo" aqui. Edição pula
 // o teclado e abre direto em 'detalhes', igual já fizemos pro TransactionFlow.
-const RecurrenceFlow = ({ tipoInicial, recorrenciaParaEditar, onFechar, onRecorrenciaSalva, aoExcluir }) => {
+//
+// O flow só coleta os dados: criar/editar/encerrar/excluir (e as confirmações) são do hook,
+// que sabe o que acontece com as contas já geradas. Cada callback devolve true/false.
+const RecurrenceFlow = ({ tipoInicial, recorrenciaParaEditar, onFechar, aoCriar, aoEditar, aoEncerrar, aoExcluir }) => {
   const modoEdicao = !!recorrenciaParaEditar;
 
   const [estado, setEstado] = useState(() => ({
@@ -20,6 +22,7 @@ const RecurrenceFlow = ({ tipoInicial, recorrenciaParaEditar, onFechar, onRecorr
     diaDoMes: modoEdicao ? recorrenciaParaEditar.diaDoMes : 1,
     salvando: false,
     excluindo: false,
+    encerrando: false,
   }));
 
   const atualizar = (patch) => setEstado((prev) => ({ ...prev, ...patch }));
@@ -40,7 +43,7 @@ const RecurrenceFlow = ({ tipoInicial, recorrenciaParaEditar, onFechar, onRecorr
     atualizar({ salvando: true });
 
     const dados = {
-      descricao: estado.descricao,
+      descricao: estado.descricao.trim(),
       valor: Number(estado.valorCentavos) / 100,
       tipo: estado.tipo,
       categoria: estado.categoria,
@@ -48,16 +51,9 @@ const RecurrenceFlow = ({ tipoInicial, recorrenciaParaEditar, onFechar, onRecorr
     };
 
     try {
-      if (modoEdicao) {
-        await atualizarRecorrencia(recorrenciaParaEditar.id, dados);
-        onRecorrenciaSalva({ ...recorrenciaParaEditar, ...dados });
-        toast.success('Recorrência atualizada!');
-      } else {
-        const criada = await criarRecorrencia(dados);
-        onRecorrenciaSalva(criada);
-        toast.success(estado.tipo === 'receita' ? 'Receita recorrente criada!' : 'Despesa recorrente criada!');
-      }
-      onFechar();
+      const salvou = modoEdicao ? await aoEditar(recorrenciaParaEditar, dados) : await aoCriar(dados);
+      if (salvou) onFechar();
+      else atualizar({ salvando: false });
     } catch (erro) {
       console.error('Erro ao salvar recorrência:', erro);
       toast.error('Não foi possível salvar. Tente novamente.');
@@ -65,17 +61,18 @@ const RecurrenceFlow = ({ tipoInicial, recorrenciaParaEditar, onFechar, onRecorr
     }
   };
 
-  const excluir = async () => {
-    if (estado.excluindo) return;
-    atualizar({ excluindo: true });
+  // Excluir e encerrar passam pela confirmação do hook; `false` = cancelou ou foi recusado.
+  const executarAcaoDaSerie = async (acao, chave) => {
+    if (estado[chave]) return;
+    atualizar({ [chave]: true });
     try {
-      const excluiu = await aoExcluir(recorrenciaParaEditar.id);
-      if (excluiu) onFechar();
-      else atualizar({ excluindo: false });
+      const concluiu = await acao(recorrenciaParaEditar);
+      if (concluiu) onFechar();
+      else atualizar({ [chave]: false });
     } catch (erro) {
-      console.error('Erro ao excluir recorrência:', erro);
-      toast.error('Não foi possível excluir. Tente novamente.');
-      atualizar({ excluindo: false });
+      console.error('Erro na ação da recorrência:', erro);
+      toast.error('Não foi possível concluir. Tente novamente.');
+      atualizar({ [chave]: false });
     }
   };
 
@@ -108,7 +105,10 @@ const RecurrenceFlow = ({ tipoInicial, recorrenciaParaEditar, onFechar, onRecorr
       onSalvar={salvar}
       modoEdicao={modoEdicao}
       excluindo={estado.excluindo}
-      onExcluir={aoExcluir ? excluir : undefined}
+      onExcluir={aoExcluir ? () => executarAcaoDaSerie(aoExcluir, 'excluindo') : undefined}
+      encerrada={modoEdicao && recorrenciaParaEditar.ativa === false}
+      encerrando={estado.encerrando}
+      onEncerrar={aoEncerrar ? () => executarAcaoDaSerie(aoEncerrar, 'encerrando') : undefined}
     />
   );
 };

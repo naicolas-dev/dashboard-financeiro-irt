@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { SegmentGroup } from '@chakra-ui/react';
-import { InboxIcon, ArrowPathIcon, SignalSlashIcon } from '@heroicons/react/24/outline';
+import { InboxIcon, SignalSlashIcon } from '@heroicons/react/24/outline';
 import FinancialHero from '../componentes/FinancialHero.jsx';
 import TransactionRow from '../componentes/TransactionRow.jsx';
-import RecurrenceRow from '../componentes/RecurrenceRow.jsx';
+import Programadas from '../componentes/Programadas.jsx';
 import FloatingActionButton from '../componentes/FloatingActionButton.jsx';
 import ResponsiveDialog from '../componentes/ui/ResponsiveDialog.jsx';
 import TransactionFlow from '../componentes/TransactionFlow.jsx';
@@ -45,8 +45,13 @@ const Home = ({
   erroCarregamento,
   handleTransacaoSalva,
   recorrencias,
-  handleRecorrenciaSalva,
-  excluirRecorrencia,
+  programadas,
+  acoesProgramadas,
+  criarSerieRecorrente,
+  editarSerieRecorrente,
+  encerrarSerieRecorrente,
+  excluirSerieRecorrente,
+  podeExcluirSerieRecorrente,
   cartoes,
   handleCartaoSalvo,
   handleCompraCriada,
@@ -58,7 +63,7 @@ const Home = ({
   const [recolhido, setRecolhido] = useState(false);
   const [fluxoAberto, setFluxoAberto] = useState(false);
   const [tipoFluxo, setTipoFluxo] = useState(null);
-  const [secaoHistorico, setSecaoHistorico] = useState('transacoes'); // 'transacoes' | 'recorrentes'
+  const [secaoHistorico, setSecaoHistorico] = useState('transacoes'); // 'transacoes' | 'programadas'
   const [recorrenciaEditando, setRecorrenciaEditando] = useState(null);
   const [recorrenteDialogAberto, setRecorrenteDialogAberto] = useState(false);
   const [tipoNovaRecorrencia, setTipoNovaRecorrencia] = useState('despesa');
@@ -104,7 +109,7 @@ const Home = ({
 
   const fecharRecorrenteDialog = useCallback(() => setRecorrenteDialogAberto(false), []);
   // Chamado pelas QuickActions Receita/Despesa do Hero quando `secaoHistorico` já
-  // está em 'recorrentes' — nesse modo elas não abrem o TransactionFlow, abrem
+  // está em 'programadas' — nesse modo elas não abrem o TransactionFlow, abrem
   // direto a criação de uma regra recorrente já com o tipo certo.
   const abrirNovaRecorrencia = useCallback((tipo) => {
     setRecorrenciaEditando(null);
@@ -116,7 +121,7 @@ const Home = ({
     setRecorrenteDialogAberto(true);
   }, []);
 
-  const modoRecorrentes = secaoHistorico === 'recorrentes';
+  const modoRecorrentes = secaoHistorico === 'programadas';
 
   const aoClicarReceita = () => (modoRecorrentes ? abrirNovaRecorrencia('receita') : abrirTransacao('receita'));
   const aoClicarDespesa = () => (modoRecorrentes ? abrirNovaRecorrencia('despesa') : abrirTransacao('despesa'));
@@ -151,7 +156,7 @@ const Home = ({
           <SegmentGroup.Indicator className="rounded-full bg-surface-raised dark:bg-surface-active shadow-sm" />
           {[
             { valor: 'transacoes', texto: 'Últimas transações' },
-            { valor: 'recorrentes', texto: 'Transações recorrentes' },
+            { valor: 'programadas', texto: 'Programadas' },
           ].map((item) => (
             <SegmentGroup.Item key={item.valor} value={item.valor}>
               <SegmentGroup.ItemText
@@ -167,31 +172,16 @@ const Home = ({
         </SegmentGroup.Root>
 
         {modoRecorrentes ? (
-          recorrencias.length === 0 ? (
-            erroCarregamento ? (
-              <EmptyState icone={SignalSlashIcon} titulo="Sem conexão" descricao="Não foi possível carregar as recorrências." />
-            ) : (
-              <EmptyState
-                icone={ArrowPathIcon}
-                titulo="Nenhuma recorrência"
-                descricao="Toque em Receita ou Despesa acima para criar uma regra, como salário ou aluguel."
-              />
-            )
-          ) : (
-            <div className="rounded-2xl border border-border bg-surface-raised p-2 divide-y divide-border">
-              {recorrencias.map((r) => (
-                <RecurrenceRow
-                  key={r.id}
-                  descricao={r.descricao}
-                  valor={r.valor}
-                  tipo={r.tipo}
-                  diaDoMes={r.diaDoMes}
-                  onEditar={() => abrirEditarRecorrencia(r)}
-                  onExcluir={() => excluirRecorrencia(r.id)}
-                />
-              ))}
-            </div>
-          )
+          <Programadas
+            programadas={programadas}
+            recorrencias={recorrencias}
+            acoes={acoesProgramadas}
+            erroCarregamento={erroCarregamento}
+            podeExcluirSerie={podeExcluirSerieRecorrente}
+            onEditarSerie={abrirEditarRecorrencia}
+            onEncerrarSerie={encerrarSerieRecorrente}
+            onExcluirSerie={excluirSerieRecorrente}
+          />
         ) : recentes.length === 0 ? (
           erroCarregamento ? (
             <EmptyState icone={SignalSlashIcon} titulo="Sem conexão" descricao="Não foi possível carregar as transações." />
@@ -237,8 +227,10 @@ const Home = ({
             tipoInicial={tipoNovaRecorrencia}
             recorrenciaParaEditar={recorrenciaEditando}
             onFechar={fecharRecorrenteDialog}
-            onRecorrenciaSalva={handleRecorrenciaSalva}
-            aoExcluir={excluirRecorrencia}
+            aoCriar={criarSerieRecorrente}
+            aoEditar={editarSerieRecorrente}
+            aoEncerrar={encerrarSerieRecorrente}
+            aoExcluir={recorrenciaEditando && podeExcluirSerieRecorrente(recorrenciaEditando) ? excluirSerieRecorrente : undefined}
           />
         )}
       </ResponsiveDialog>

@@ -1,41 +1,30 @@
 import React from 'react';
-import { ArrowPathIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/outline';
-import IconButton from './ui/IconButton';
+import { ArrowPathIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
 const formatadorMoeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
-// Mesmo padrão visual/estrutural do TransactionRow (ícone + texto + valor + botões
-// de editar/excluir) — linha de regra recorrente, não de transação já lançada.
-const RecurrenceRow = ({ descricao, valor, tipo, diaDoMes, onEditar, onExcluir }) => {
-  const ehReceita = tipo === 'receita';
+// Linha de SÉRIE (a regra que gera as contas) — gestão secundária: compacta, neutra, sem ações
+// inline. Tocar abre a sheet com Editar / Encerrar / Excluir (RecurrenceActions).
+const RecurrenceRow = ({ descricao, valor, tipo, diaDoMes, encerrada = false, onClick }) => {
+  const detalhe = [tipo === 'receita' ? 'Receita' : null, formatadorMoeda.format(valor), 'mensal', `dia ${diaDoMes}`, encerrada ? 'encerrada' : null]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
-    <div className="flex items-center gap-1 py-1 px-2 -mx-2 rounded-xl">
-      <div className="flex-1 flex items-center gap-3 min-w-0 py-2">
-        <div
-          className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 ${
-            ehReceita ? 'bg-positive/10 text-positive' : 'bg-negative/10 text-negative'
-          }`}
-        >
-          <ArrowPathIcon className="h-5 w-5" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="font-medium text-foreground truncate">{descricao}</p>
-          <p className="text-xs text-foreground-muted">Todo dia {diaDoMes}</p>
-        </div>
-        <p className={`font-semibold tabular-nums shrink-0 ${ehReceita ? 'text-positive' : 'text-negative'}`}>
-          {formatadorMoeda.format(valor)}
-        </p>
-      </div>
-      <div className="flex items-center gap-0.5 shrink-0">
-        <IconButton aria-label={`Editar ${descricao}`} onClick={onEditar}>
-          <PencilSquareIcon className="h-5 w-5" />
-        </IconButton>
-        <IconButton aria-label={`Excluir ${descricao}`} variant="danger" onClick={onExcluir}>
-          <TrashIcon className="h-5 w-5" />
-        </IconButton>
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`focus-ring cursor-pointer w-[calc(100%+1rem)] min-h-14 flex items-center gap-3 py-2.5 px-2 -mx-2 rounded-xl text-left hover:bg-surface-hover ${encerrada ? 'opacity-60' : ''}`}
+    >
+      <span className="h-8 w-8 rounded-full bg-surface-hover text-foreground-muted flex items-center justify-center shrink-0">
+        <ArrowPathIcon className="h-4 w-4" />
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-sm font-medium text-foreground truncate">{descricao}</span>
+        <span className="block text-xs text-foreground-muted truncate">{detalhe}</span>
+      </span>
+      <ChevronRightIcon className="h-4 w-4 text-foreground-muted shrink-0" />
+    </button>
   );
 };
 

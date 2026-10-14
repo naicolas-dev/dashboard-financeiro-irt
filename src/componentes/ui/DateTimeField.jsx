@@ -18,7 +18,8 @@ function pad(n) {
 // DatePicker cuida só da data (ele não tem noção de hora) + um input nativo
 // type="time" cuida do minuto exato — perder a hora era o risco real desta
 // peça da migração, por isso a hora nunca passa pelo DatePicker.
-const DateTimeField = ({ label, value, onChange, id }) => {
+// `somenteData`: esconde a hora (vencimentos são datas puras); o valor segue no mesmo formato.
+const DateTimeField = ({ label, value, onChange, id, somenteData = false }) => {
   const [dataParte, horaParte] = value.split('T');
 
   const dataSelecionada = useMemo(() => [paraCalendarDate(dataParte)], [dataParte]);
@@ -42,7 +43,7 @@ const DateTimeField = ({ label, value, onChange, id }) => {
           {label}
         </label>
       )}
-      <div className="grid grid-cols-2 gap-2">
+      <div className={`grid gap-2 ${somenteData ? 'grid-cols-1' : 'grid-cols-2'}`}>
         {/* lazyMount/unmountOnExit: fechado, o calendário (dia/mês/ano) era quase
             metade dos nós da tela de detalhes — agora só existe enquanto aberto. */}
         <DatePicker.Root
@@ -87,13 +88,15 @@ const DateTimeField = ({ label, value, onChange, id }) => {
           </Portal>
         </DatePicker.Root>
 
-        <input
-          type="time"
-          value={horaParte}
-          onChange={aoMudarHora}
-          aria-label="Hora"
-          className="focus-ring w-full h-11 px-3.5 rounded-xl bg-surface-raised text-foreground border border-border outline-none text-sm"
-        />
+        {!somenteData && (
+          <input
+            type="time"
+            value={horaParte}
+            onChange={aoMudarHora}
+            aria-label="Hora"
+            className="focus-ring w-full h-11 px-3.5 rounded-xl bg-surface-raised text-foreground border border-border outline-none text-sm"
+          />
+        )}
       </div>
     </div>
   );

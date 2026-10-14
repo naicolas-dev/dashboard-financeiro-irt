@@ -46,3 +46,24 @@ export function formatarCabecalhoData(isoString) {
 export function formatarHora(isoString) {
   return paraData(isoString).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
+
+// Data pura ('YYYY-MM-DD', vencimentos) ou instante, só para exibição: "14/10" e "14/10/2026".
+export function formatarDiaMes(valor) {
+  return paraData(valor).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
+
+export function formatarDataNumerica(valor) {
+  return paraData(valor).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+// Agenda: "15 out" e "qua, 15 out" (sem o ponto que o Intl põe nas abreviações).
+const semPonto = (texto) => texto.replace('.', '');
+export function formatarDataCurta(valor) {
+  const data = paraData(valor);
+  return `${data.getDate()} ${semPonto(data.toLocaleDateString('pt-BR', { month: 'short' }))}`;
+}
+
+export function formatarDataComDiaDaSemana(valor) {
+  const data = paraData(valor);
+  return `${semPonto(data.toLocaleDateString('pt-BR', { weekday: 'short' }))}, ${formatarDataCurta(valor)}`;
+}
